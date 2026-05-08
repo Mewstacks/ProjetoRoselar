@@ -228,6 +228,7 @@ def authorize_discount_api(request: HttpRequest) -> JsonResponse:
         logging.getLogger(__name__).exception('authorize_discount_api error')
         return JsonResponse({'authorized': False, 'error': 'Erro interno'}, status=500)
 
+@login_required
 @require_http_methods(["GET"])
 def get_architect_commission_api(request: HttpRequest) -> JsonResponse:
     from core.models import ArchitectCommission
@@ -1664,28 +1665,19 @@ def _run_simulation(
     has_architect: bool,
     payment_methods: list[dict],
 ) -> dict:
-    """Motor de Margem Unificado (Pool de Margem).
+    """Motor de Margem Unificado.
 
-    A saúde da venda e a comissão do vendedor derivam estritamente do
-    budget de 12% da loja sobre o subtotal:
-
-        budget_loja          = subtotal * 12%
-        gordura_acrescimo    = subtotal * markup%
-        queima_desconto      = subtotal * desconto%
-        custos_operacionais  = juros_banco + arquiteto + queima_desconto
-        saldo_margem         = (budget + gordura) - custos_operacionais
-
-    O termômetro é dado pelo `saldo_margem`:
-        ≥ 0  → VERDE (com bônus 3% em parcelamentos 7–10x quando sobra ≥ 1%)
-        < 0  → tenta sacrifício de 1% do vendedor → AMARELO; senão VERMELHO.
+    Recebe freight_value JÁ com markup por dentro (calculado em _build_simulation_context).
+    Comissão interpolada linearmente entre 2% (MLD=0) e 5% (MLD≥12%).
+    Status: VERMELHO se MLD<0, AMARELO se 0≤MLD<2, VERDE se MLD≥2.
     """
+    from decimal import ROUND_HALF_UP
     subtotal      = Decimal(str(subtotal or 0))
     freight_value = Decimal(str(freight_value or 0))
     discount_pct  = Decimal(str(discount_pct or 0))
     markup_pct    = Decimal(str(markup_pct or 0))
     down_payment  = Decimal(str(down_payment or 0))
 
-    # Sem subtotal não há simulação — retorna estado neutro.
     if subtotal <= 0:
         return {
             "status": "NEUTRO",
@@ -1702,28 +1694,27 @@ def _run_simulation(
             "max_parcelas": 1,
         }
 
-    # 1. Valores Base e Ajustados
+    # 1. Valores Base (freight já chega com markup por dentro)
     valor_produtos_ajustado = subtotal * (
         Decimal('1') + (markup_pct / Decimal('100')) - (discount_pct / Decimal('100'))
     )
     valor_total_venda = valor_produtos_ajustado + freight_value
 
-    # Validação de Entrada
-    entrada_efetiva = min(max(Decimal('0'), down_payment), max(Decimal('0'), valor_total_venda))
+    entrada_efetiva   = min(max(Decimal('0'), down_payment), max(Decimal('0'), valor_total_venda))
     valor_a_financiar = max(Decimal('0'), valor_total_venda - entrada_efetiva)
 
-    # 2. Custo do Arquiteto (5% sobre o valor ajustado líquido da margem de 12%)
+    # 2. Custo Arquiteto
     custo_arquiteto = Decimal('0')
     if has_architect:
-        base_arquiteto = valor_produtos_ajustado * (Decimal('1') - Decimal('0.12'))
+        base_arquiteto  = valor_produtos_ajustado * (Decimal('1') - Decimal('0.12'))
         custo_arquiteto = base_arquiteto * Decimal('0.05')
 
-    # 3. Juros do Banco (Ponderado caso haja Split)
+    # 3. Juros Ponderados + isolamento do juro do frete
     juros_totais_banco = Decimal('0')
     juros_so_do_frete  = Decimal('0')
-    metodo_principal = None
-    max_parcelas = 1
-    maior_valor = Decimal('-1')
+    metodo_principal   = None
+    max_parcelas       = 1
+    maior_valor        = Decimal('-1')
 
     if payment_methods and valor_a_financiar > 0:
         for metodo in payment_methods:
@@ -1731,60 +1722,47 @@ def _run_simulation(
             metodo_fee   = Decimal(str(metodo.get('fee_pct') or 0))
             metodo_inst  = int(metodo.get('installments') or 1)
 
-            # Encontrar o método principal (o que tem maior valor) para base de comissão
             if metodo_value > maior_valor:
-                maior_valor = metodo_value
+                maior_valor      = metodo_value
                 metodo_principal = metodo.get('type')
-                max_parcelas = metodo_inst
+                max_parcelas     = metodo_inst
 
-            # A entrada abate proporcionalmente do valor que passa na maquininha.
             proporcao = (metodo_value / valor_total_venda) if valor_total_venda > 0 else Decimal('0')
             valor_real_financiado_neste_metodo = valor_a_financiar * proporcao
-
-            juros_metodo = valor_real_financiado_neste_metodo * (metodo_fee / Decimal('100'))
+            juros_metodo        = valor_real_financiado_neste_metodo * (metodo_fee / Decimal('100'))
             juros_totais_banco += juros_metodo
 
-            # Isola a parcela do juro gerada pelo frete (custo do cliente, não da loja)
+            # O juro do frete já foi coberto pelo markup por dentro — isola para não penalizar a margem
             if valor_total_venda > 0:
-                proporcao_frete = freight_value / valor_total_venda
+                proporcao_frete    = freight_value / valor_total_venda
                 juros_so_do_frete += juros_metodo * proporcao_frete
     else:
-        # Sem método de pagamento informado → tratado como à vista / PIX.
         metodo_principal = 'PIX'
-        max_parcelas = 1
+        max_parcelas     = 1
 
-    # 4. Motor de Margem (A Única Fonte da Verdade)
-    budget_loja        = subtotal * Decimal('0.12')
-    gordura_acrescimo  = subtotal * (markup_pct / Decimal('100'))
-    queima_desconto    = subtotal * (discount_pct / Decimal('100'))
+    # 4. Motor de Margem
+    budget_loja       = subtotal * Decimal('0.12')
+    gordura_acrescimo = subtotal * (markup_pct  / Decimal('100'))
+    queima_desconto   = subtotal * (discount_pct / Decimal('100'))
 
-    # Subtrai o juro gerado pelo frete: esse custo é do cliente, não da margem da loja
     custos_operacionais = (juros_totais_banco - juros_so_do_frete) + custo_arquiteto + queima_desconto
     lucro_sobra         = (budget_loja + gordura_acrescimo) - custos_operacionais
-
-    # Converte o lucro real que sobrou em percentual (Margem Líquida Disponível – MLD)
     mld_pct = (lucro_sobra / subtotal) * Decimal('100') if subtotal > Decimal('0') else Decimal('0')
 
-    # 5. Escalonamento por Degraus da Comissão
+    # 5. Comissão linear blindada [2%, 5%] + status
     sacrificio_ativo = False
+    mld_clamp = max(Decimal('0'), min(mld_pct, Decimal('12')))
+    comissao_final = (Decimal('2') + (mld_clamp / Decimal('12')) * Decimal('3')).quantize(
+        Decimal('0.01'), rounding=ROUND_HALF_UP
+    )
 
-    if mld_pct <= Decimal('0.0'):
-        comissao_final = Decimal('2.0')
+    if mld_pct < Decimal('0'):
         status_simulacao = "VERMELHO"
-    elif mld_pct >= Decimal('12.0'):
-        comissao_final = Decimal('5.0')
-        status_simulacao = "VERDE"
-    elif mld_pct >= Decimal('7.0'):
-        comissao_final = Decimal('4.0')
-        status_simulacao = "VERDE"
-    elif mld_pct >= Decimal('2.0'):
-        comissao_final = Decimal('3.0')
-        status_simulacao = "VERDE"
-    else:
-        # 0 < MLD < 2% — margem existe mas apertada
-        comissao_final = Decimal('2.0')
+    elif mld_pct < Decimal('2'):
         status_simulacao = "AMARELO"
         sacrificio_ativo = True
+    else:
+        status_simulacao = "VERDE"
 
     return {
         "status": status_simulacao,
@@ -1854,26 +1832,35 @@ def _build_simulation_context(
 
     split_mode = bool(sim_payment_type_2)
 
-    # Total temporário (antes de aplicar entrada): base para a divisão do split.
-    valor_temporario_total = (
-        subtotal * (Decimal("1") + price_increase_pct / Decimal("100") - sim_discount / Decimal("100"))
-    ) + freight_value
-    valor_temporario_total = max(Decimal("0"), valor_temporario_total)
+    # ---- Taxas antecipadas (necessárias para calcular o markup do frete) ----
+    fee_1 = Decimal("0")
+    fee_2 = Decimal("0")
+    if sim_payment_type:
+        fee_1 = Decimal(str(PaymentTariff.get_fee(sim_payment_type, sim_installments)))
+    if split_mode and sim_payment_type_2:
+        fee_2 = Decimal(str(PaymentTariff.get_fee(sim_payment_type_2, sim_installments_2)))
+
+    # ---- Markup por dentro no Frete ANTES de dividir o valor entre pernas ----
+    # Usa a maior taxa para garantir que a pior perna ainda cobre o frete exato.
+    taxa_maxima        = max(fee_1, fee_2)
+    taxa_decimal_frete = taxa_maxima / Decimal("100")
+    if taxa_decimal_frete < Decimal("1") and freight_value > 0:
+        freight_cobrado = freight_value / (Decimal("1") - taxa_decimal_frete)
+    else:
+        freight_cobrado = freight_value
+
+    # ---- Total temporário baseado no frete JÁ com markup ----
+    adj_subtotal_tmp   = subtotal * (Decimal("1") + price_increase_pct / Decimal("100") - sim_discount / Decimal("100"))
+    valor_temporario_total = max(Decimal("0"), adj_subtotal_tmp + freight_cobrado)
 
     # ---- Construção da lista de métodos de pagamento para o Motor ----
     payment_methods: list[dict] = []
-    fee_1 = Decimal("0")
-    fee_2 = Decimal("0")
     valor_leg_1 = valor_temporario_total
     valor_leg_2 = Decimal("0")
-
-    if sim_payment_type:
-        fee_1 = Decimal(str(PaymentTariff.get_fee(sim_payment_type, sim_installments)))
 
     if split_mode and sim_split_amount and sim_payment_type:
         valor_leg_1 = min(Decimal(str(sim_split_amount)), valor_temporario_total)
         valor_leg_2 = max(Decimal("0"), valor_temporario_total - valor_leg_1)
-        fee_2 = Decimal(str(PaymentTariff.get_fee(sim_payment_type_2, sim_installments_2)))
         payment_methods.append({
             'type': sim_payment_type, 'installments': sim_installments,
             'fee_pct': fee_1, 'value': valor_leg_1,
@@ -1893,13 +1880,19 @@ def _build_simulation_context(
     dp_input = max(Decimal("0"), Decimal(str(down_payment_value or 0)))
 
     dp_min_value = Decimal("0")
-    # Usa EXATAMENTE o que o cara digitou (dp_input), sem forçar mínimo nenhum.
-    dp_capped = min(dp_input, valor_temporario_total)
+    if split_mode:
+        # No modo Entrada Financiada a perna 1 já foi embutida nos payment_methods
+        # com a sua respectiva taxa. Passar um down_payment aqui faria o motor
+        # descontar o valor duas vezes (uma como abatimento à vista, outra como taxa).
+        dp_capped = Decimal("0")
+    else:
+        # Usa EXATAMENTE o que o cara digitou (dp_input), sem forçar mínimo nenhum.
+        dp_capped = min(dp_input, valor_temporario_total)
 
-    # ---- Executa o Motor Centralizado ----
+    # ---- Executa o Motor Centralizado (passa frete com markup) ----
     resultado = _run_simulation(
         subtotal=subtotal,
-        freight_value=freight_value,
+        freight_value=freight_cobrado,
         discount_pct=sim_discount,
         markup_pct=price_increase_pct,
         down_payment=dp_capped,
@@ -1923,14 +1916,18 @@ def _build_simulation_context(
             _queima   = subtotal * (sim_discount / Decimal("100"))
             _arquiteto = (_adj * (Decimal("1") - Decimal("0.12"))) * Decimal("0.05") if sim_has_architect else Decimal("0")
             _margem_fixa = _budget + _gordura - _arquiteto - _queima
-            if _margem_fixa > 0:
-                _financed_max = _margem_fixa * Decimal("100") / taxa_efetiva
-                dp_to_unlock = max(Decimal("0"), valor_temporario_total - _financed_max)
-                dp_to_unlock = dp_to_unlock.quantize(Decimal("0.01"), rounding=ROUND_CEILING)
+            if _margem_fixa > 0 and _adj > 0:
+                # Após o fix de juros_so_do_frete, só o juro proporcional aos produtos
+                # pesa na margem da loja. Escala a taxa efetiva pelo fator produto/total.
+                _taxa_produto = taxa_efetiva * (_adj / valor_temporario_total)
+                if _taxa_produto > 0:
+                    _financed_max = _margem_fixa * Decimal("100") / _taxa_produto
+                    dp_to_unlock = max(Decimal("0"), valor_temporario_total - _financed_max)
+                    dp_to_unlock = dp_to_unlock.quantize(Decimal("0.01"), rounding=ROUND_CEILING)
 
     # ---- Valores derivados para os templates ----
     adj_subtotal      = resultado['totals']['adj_subtotal']
-    total_before_disc = adj_subtotal + freight_value
+    total_before_disc = adj_subtotal + freight_cobrado
     discount_value    = resultado['totals']['discount_value']
     final_total       = resultado['totals']['final_total']
     down_payment_used = resultado['totals']['down_payment']
@@ -2025,7 +2022,7 @@ def _build_simulation_context(
     return {
         # Inputs devolvidos para a tela
         'subtotal':                 subtotal,
-        'freight_value':            freight_value,
+        'freight_value':            freight_cobrado,  # frete com markup embutido
         'discount_percent':         sim_discount,
         'price_increase_pct':       price_increase_pct,
         'price_increase_pct_2':     price_increase_pct_2,
@@ -2366,9 +2363,14 @@ def quote_duplicate(request, quote_id):
             shipping_payment_method=original.shipping_payment_method,
             discount_percent=original.discount_percent,
             has_architect=original.has_architect,
+            architect=original.architect,
             payment_type=original.payment_type,
             payment_installments=original.payment_installments,
             payment_fee_percent=original.payment_fee_percent,
+            payment_type_2=original.payment_type_2,
+            payment_installments_2=original.payment_installments_2,
+            payment_fee_percent_2=original.payment_fee_percent_2,
+            payment_split_amount=original.payment_split_amount,
         )
 
         for item in original.items.all():

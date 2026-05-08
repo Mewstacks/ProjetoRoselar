@@ -224,27 +224,18 @@
               </div>
               <div class="s-body">
 
-                <!-- Split toggle — hidden; kept for JS compat -->
-                <label class="sw mb-3" for="chk-split" style="display:none;">
-                  <input type="checkbox" id="chk-split" value="1"
-                         onchange="toggleSplitMode()">
-                  <span class="track"></span>
-                  <span>
-                    <span class="sw-t">Dividir pagamento</span><br>
-                    <span class="sw-s">Combine dois métodos de pagamento</span>
-                  </span>
-                </label>
-
-                <!-- ─── Method 1 wrapper — gets card border in split mode ─── -->
+                <!-- ─── Método 1 — ganha borda colorida no split mode ─── -->
                 <div id="method1-wrap"
-                     style="{% if split_mode %}border:1.5px solid var(--brand);border-radius:10px;padding:.75rem .9rem;margin-bottom:.5rem;{% endif %}transition:all .2s;">
-                  <!-- Badge header — only visible in split mode -->
+                     style="{% if split_mode %}border:1.5px solid var(--brand);border-radius:10px;padding:.75rem .9rem;margin-bottom:0;{% endif %}transition:all .2s;">
+
+                  <!-- Badge visível só no split mode -->
                   <div id="method1-hdr"
-                       style="display:{% if split_mode %}flex{% else %}none{% endif %};align-items:center;gap:.5rem;margin-bottom:.6rem;">
-                    <span style="background:var(--brand);color:#fff;font-size:.68rem;font-weight:800;width:1.35rem;height:1.35rem;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">1</span>
-                    <span style="font-size:.75rem;font-weight:700;color:var(--brand);text-transform:uppercase;letter-spacing:.06em;">Pagamento 1</span>
+                       style="display:{% if split_mode %}flex{% else %}none{% endif %};align-items:center;gap:.5rem;margin-bottom:.55rem;">
+                    <span style="background:var(--brand);color:#fff;font-size:.6rem;width:1.4rem;height:1.4rem;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fa-solid fa-hand-holding-dollar"></i></span>
+                    <span style="font-size:.74rem;font-weight:800;color:var(--brand);text-transform:uppercase;letter-spacing:.08em;">Entrada</span>
                   </div>
-                  <!-- Selectors + fee chip -->
+
+                  <!-- Seletores + chip de taxa -->
                   <div class="row g-2 align-items-end">
                     <div class="col-sm-7">
                       <label class="f-label mb-1"><i class="fa-solid fa-wallet me-1"></i>Forma</label>
@@ -261,41 +252,67 @@
                     </div>
                     <div class="col-sm-2">
                       <div style="background:var(--surface2,#f4f4f4);border-radius:8px;padding:.4rem .5rem;text-align:center;display:flex;align-items:center;justify-content:center;flex-direction:column;min-height:2.35rem;">
-                        <div style="font-size:.55rem;color:var(--muted);font-weight:700;text-transform:uppercase;">Taxa</div>
-                        <div id="fee-display" style="font-size:.9rem;font-weight:800;color:var(--brand);">{{ payment_fee_percent|floatformat:2 }}%</div>
+                        <div style="font-size:.5rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.03em;">Taxa</div>
+                        <div id="fee-display" style="font-size:.88rem;font-weight:800;color:var(--brand);">{{ payment_fee_percent|floatformat:2 }}%</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Toggle Entrada — abaixo dos seletores -->
+                  <label class="sw mt-3" for="chk-split">
+                    <input type="checkbox" id="chk-split" value="1"
+                           {% if split_mode %}checked{% endif %}
+                           onchange="toggleSplitMode()">
+                    <span class="track"></span>
+                    <span>
+                      <span class="sw-t"><i class="fa-solid fa-hand-holding-dollar me-1" style="color:var(--brand);font-size:.85em;"></i>Entrada</span><br>
+                      <span class="sw-s">Define um valor de entrada e escolhe uma forma diferente para o restante</span>
+                    </span>
+                  </label>
+
+                  <!-- Campo Valor da Entrada — visível só no split mode -->
+                  <div id="split-amount-wrap" style="display:{% if split_mode %}block{% else %}none{% endif %};margin-top:.75rem;">
+                    <label class="f-label mb-1"><i class="fa-solid fa-coins me-1"></i>Valor da Entrada</label>
+                    <div class="row g-2 align-items-center">
+                      <div class="col">
+                        <div style="display:flex;align-items:stretch;border:1.5px solid var(--brand);border-radius:8px;overflow:hidden;background:var(--surface,#fff);">
+                          <span style="padding:.42rem .7rem;background:var(--brand);color:#fff;font-weight:800;font-size:.85rem;flex-shrink:0;display:flex;align-items:center;">R$</span>
+                          <input type="text" id="split-amount-input"
+                                 placeholder="0,00"
+                                 value="{% if split_mode and sim_split_amount %}{{ sim_split_amount|floatformat:2 }}{% endif %}"
+                                 style="border:none;outline:none;padding:.42rem .6rem;font-weight:700;font-size:.95rem;width:100%;color:var(--fg);background:transparent;"
+                                 inputmode="decimal" oninput="maskCurrency(this); onSplitAmountChange(this.value)">
+                        </div>
+                      </div>
+                      <div class="col-auto">
+                        <div class="stat" style="min-width:88px;">
+                          <div class="stat-l">Restante</div>
+                          <div class="stat-v" id="split-remainder-lbl" style="font-size:.88rem;">—</div>
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
-                <!-- alias kept for JS compat (single-mode fee display) -->
+
+                <!-- alias JS compat -->
                 <span id="fee-display-single" style="display:none;">{{ payment_fee_percent|floatformat:2 }}%</span>
                 <div id="single-fee-row" style="display:none;"></div>
 
-                <!-- ─── Split panel — always hidden (feature removed from UI) ─── -->
-                <div id="split-panel" style="display:none;">
+                <!-- ─── Painel do Restante (split mode) ─── -->
+                <div id="split-panel" style="display:{% if split_mode %}block{% else %}none{% endif %};">
 
-                  <!-- Split amount -->
-                  <div style="padding:.5rem .1rem .5rem .5rem;border-left:2px dashed var(--brand);margin-left:1rem;margin-bottom:.5rem;">
-                    <label class="f-label mb-1" style="font-size:.72rem;"><i class="fa-solid fa-scissors me-1" style="color:var(--brand);opacity:.7;"></i>Valor destinado ao Pagamento 1</label>
-                    <div class="d-flex align-items-center gap-2">
-                      <div class="input-group input-group-sm" style="max-width:200px;">
-                        <span class="input-group-text fw-bold"
-                              style="background:var(--brand);color:#fff;border:none;border-radius:8px 0 0 8px;font-size:.82rem;">R$</span>
-                        <input type="text" id="split-amount-input" class="form-control"
-                               placeholder="0,00"
-                               value="{% if split_mode and sim_split_amount %}{{ sim_split_amount|floatformat:2 }}{% endif %}"
-                               style="font-weight:700;border-radius:0 8px 8px 0;border-color:var(--brand);"
-                               inputmode="decimal" oninput="maskCurrency(this); onSplitAmountChange(this.value)">
-                      </div>
-                      <span id="split-remainder-lbl" style="font-size:.75rem;color:var(--muted);"></span>
-                    </div>
+                  <!-- Conector "depois" -->
+                  <div style="display:flex;align-items:center;gap:.5rem;padding:.5rem .2rem;">
+                    <div style="flex:1;height:1px;background:var(--border,#e5e7eb);"></div>
+                    <span style="font-size:.62rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.07em;padding:0 .1rem;">depois</span>
+                    <div style="flex:1;height:1px;background:var(--border,#e5e7eb);"></div>
                   </div>
 
-                  <!-- Method 2 card -->
-                  <div style="border:1.5px solid var(--muted,#adb5bd);border-radius:10px;padding:.75rem .9rem;">
-                    <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.6rem;">
-                      <span style="background:var(--muted,#6c757d);color:#fff;font-size:.68rem;font-weight:800;width:1.35rem;height:1.35rem;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">2</span>
-                      <span style="font-size:.75rem;font-weight:700;color:var(--muted,#6c757d);text-transform:uppercase;letter-spacing:.06em;">Pagamento 2</span>
+                  <!-- Método 2: Restante -->
+                  <div style="border:1.5px solid var(--border,#dee2e6);border-radius:10px;padding:.75rem .9rem;background:var(--surface,#fff);">
+                    <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.55rem;">
+                      <span style="background:var(--muted,#6c757d);color:#fff;font-size:.6rem;width:1.4rem;height:1.4rem;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fa-solid fa-money-bill-wave"></i></span>
+                      <span style="font-size:.74rem;font-weight:800;color:var(--muted,#6c757d);text-transform:uppercase;letter-spacing:.08em;">Restante</span>
                     </div>
                     <div class="row g-2 align-items-end">
                       <div class="col-sm-7">
@@ -313,8 +330,8 @@
                       </div>
                       <div class="col-sm-2">
                         <div style="background:var(--surface2,#f4f4f4);border-radius:8px;padding:.4rem .5rem;text-align:center;display:flex;align-items:center;justify-content:center;flex-direction:column;min-height:2.35rem;">
-                          <div style="font-size:.55rem;color:var(--muted);font-weight:700;text-transform:uppercase;">Taxa</div>
-                          <div id="fee2-display" style="font-size:.9rem;font-weight:800;color:var(--muted,#6c757d);">{{ payment_fee_percent_2|floatformat:2 }}%</div>
+                          <div style="font-size:.5rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.03em;">Taxa</div>
+                          <div id="fee2-display" style="font-size:.88rem;font-weight:800;color:var(--muted,#6c757d);">{{ payment_fee_percent_2|floatformat:2 }}%</div>
                         </div>
                       </div>
                     </div>
@@ -433,6 +450,7 @@
                   data-margin-limit-exceeded="{{ margin_limit_exceeded|yesno:'1,0' }}"
                   data-split-both-cards="{{ split_both_cards|yesno:'1,0' }}"
                   data-split-m1-avista="{{ split_m1_avista|yesno:'1,0' }}"
+                  data-split-remainder="{{ split_amount_2|floatformat:2 }}"
                   style="display:none;"></span>
 
             <div class="s-card fi fi-1" style="border:none;box-shadow:var(--shadow-h);">
@@ -537,22 +555,23 @@
                     </div>
                     {% else %}
                     <div style="text-align:right;">
-                      <div class="hi-l" style="opacity:.8;">Pagamento dividido</div>
-                      <div style="font-size:.8rem;opacity:.75;margin-top:.15rem;">Ver detalhes abaixo</div>
+                      <div class="hi-l" style="opacity:.8;"><i class="fa-solid fa-hand-holding-dollar me-1" style="font-size:.75em;"></i>Entrada</div>
+                      <div style="font-size:.78rem;opacity:.75;margin-top:.1rem;">Ver detalhes abaixo</div>
                     </div>
                     {% endif %}
                   </div>
                 </div>
 
                 {% if split_mode %}
-                <!-- Split payment method breakdown -->
+                <!-- Breakdown Entrada Financiada -->
                 <div style="margin-top:.6rem;border-radius:10px;overflow:hidden;border:1px solid var(--border,#e5e7eb);">
-                  <!-- Method 1 row -->
+                  <!-- Entrada row -->
                   <div style="display:flex;align-items:center;justify-content:space-between;padding:.65rem .9rem;border-bottom:1px solid var(--border,#e5e7eb);background:var(--surface,#fff);">
                     <div style="display:flex;align-items:center;gap:.55rem;min-width:0;">
-                      <span style="background:var(--brand);color:#fff;font-size:.65rem;font-weight:800;width:1.25rem;height:1.25rem;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">1</span>
+                      <span style="background:var(--brand);color:#fff;font-size:.6rem;width:1.3rem;height:1.3rem;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fa-solid fa-hand-holding-dollar"></i></span>
                       <div style="min-width:0;">
-                        <div style="font-size:.78rem;font-weight:700;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px;">{{ sim_payment_desc_1 }}</div>
+                        <div style="font-size:.7rem;font-weight:700;color:var(--brand);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.1rem;">Entrada</div>
+                        <div style="font-size:.8rem;font-weight:600;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px;">{{ sim_payment_desc_1 }}</div>
                         {% if sim_installments > 1 %}
                         <div style="font-size:.7rem;color:var(--muted);">{{ sim_installments }}x de R$ {{ installment_value_1|floatformat:2 }}</div>
                         {% endif %}
@@ -562,12 +581,13 @@
                       <div style="font-size:.95rem;font-weight:800;color:var(--brand);">R$ {{ split_amount_1|floatformat:2 }}</div>
                     </div>
                   </div>
-                  <!-- Method 2 row -->
+                  <!-- Restante row -->
                   <div style="display:flex;align-items:center;justify-content:space-between;padding:.65rem .9rem;background:var(--surface,#fff);">
                     <div style="display:flex;align-items:center;gap:.55rem;min-width:0;">
-                      <span style="background:var(--muted,#6c757d);color:#fff;font-size:.65rem;font-weight:800;width:1.25rem;height:1.25rem;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">2</span>
+                      <span style="background:var(--muted,#6c757d);color:#fff;font-size:.6rem;width:1.3rem;height:1.3rem;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fa-solid fa-money-bill-wave"></i></span>
                       <div style="min-width:0;">
-                        <div style="font-size:.78rem;font-weight:700;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px;">{% if sim_payment_desc_2 %}{{ sim_payment_desc_2 }}{% else %}<span style="color:var(--muted);font-style:italic;">Não definido</span>{% endif %}</div>
+                        <div style="font-size:.7rem;font-weight:700;color:var(--muted,#6c757d);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.1rem;">Restante</div>
+                        <div style="font-size:.8rem;font-weight:600;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px;">{% if sim_payment_desc_2 %}{{ sim_payment_desc_2 }}{% else %}<span style="color:var(--muted);font-style:italic;">Não definido</span>{% endif %}</div>
                         {% if sim_installments_2 > 1 %}
                         <div style="font-size:.7rem;color:var(--muted);">{{ sim_installments_2 }}x de R$ {{ installment_value_2|floatformat:2 }}</div>
                         {% endif %}
@@ -579,90 +599,6 @@
                   </div>
                 </div>
                 {% endif %}
-
-                <!-- Target Final (collapsible) -->
-                <div class="mt-3" style="background:var(--bg);border-radius:8px;overflow:hidden;">
-                  <div style="padding:.55rem .9rem;cursor:pointer;" onclick="this.querySelector('.col-toggle').click()">
-                    <button type="button" class="col-toggle"
-                            data-bs-toggle="collapse" data-bs-target="#target-final-collapse"
-                            aria-expanded="false" aria-controls="target-final-collapse"
-                            onclick="event.stopPropagation();">
-                      <span style="display:flex;align-items:center;gap:.4rem;">
-                        <i class="fa-solid fa-bullseye" style="font-size:.75rem;color:var(--brand);"></i>
-                        Valor Final Desejado
-                      </span>
-                      <i class="fa-solid fa-chevron-down arr"></i>
-                    </button>
-                  </div>
-                  <div class="collapse" id="target-final-collapse">
-                    <div style="padding:0 .9rem .75rem;">
-                      <div class="d-flex gap-2 align-items-center">
-                        <span style="font-weight:700;color:var(--brand);">R$</span>
-                        <input type="text" id="target-final-input" class="form-control form-control-sm"
-                               placeholder="Digitar valor desejado..."
-                               value="{% if target_mode %}{{ target_final_input|floatformat:2 }}{% endif %}"
-                               style="max-width:200px;font-weight:700;font-size:1rem;border-radius:8px;"
-                               inputmode="decimal" oninput="maskCurrency(this)">
-                        <button type="button" class="btn-a dark" style="padding:.35rem .8rem;font-size:.8rem;" onclick="applyTargetFinal()">
-                          <i class="fa-solid fa-calculator"></i>Calcular
-                        </button>
-                        {% if target_mode %}
-                        <button type="button" class="btn-a secondary" style="padding:.35rem .6rem;font-size:.8rem;" onclick="clearTargetFinal()">
-                          <i class="fa-solid fa-xmark"></i>
-                        </button>
-                        {% endif %}
-                      </div>
-                      {% if target_mode %}
-                      <div style="font-size:.75rem;color:var(--green);margin-top:.35rem;">
-                        <i class="fa-solid fa-check-circle me-1"></i>
-                        Condições ajustadas para atingir R$ {{ target_final_input|floatformat:2 }}
-                      </div>
-                      {% endif %}
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Target Installment (collapsible, card only) -->
-                <div class="mt-2" id="target-installment-section" style="background:var(--bg);border-radius:8px;overflow:hidden;{% if sim_payment_type != 'CREDIT_CARD' and sim_payment_type != 'BOLETO' and sim_payment_type != 'CHEQUE' or sim_installments <= 1 %}display:none;{% endif %}">
-                  <div style="padding:.55rem .9rem;cursor:pointer;" onclick="this.querySelector('.col-toggle').click()">
-                    <button type="button" class="col-toggle"
-                            data-bs-toggle="collapse" data-bs-target="#target-installment-collapse"
-                            aria-expanded="false" aria-controls="target-installment-collapse"
-                            onclick="event.stopPropagation();">
-                      <span style="display:flex;align-items:center;gap:.4rem;">
-                        <i class="fa-solid fa-money-bill-wave" style="font-size:.75rem;color:var(--brand);"></i>
-                        Valor Final da Parcela Desejado
-                      </span>
-                      <i class="fa-solid fa-chevron-down arr"></i>
-                    </button>
-                  </div>
-                  <div class="collapse" id="target-installment-collapse">
-                    <div style="padding:0 .9rem .75rem;">
-                      <div class="d-flex gap-2 align-items-center">
-                        <span style="font-weight:700;color:var(--brand);">R$</span>
-                        <input type="text" id="target-installment-input" class="form-control form-control-sm"
-                               placeholder="Valor da parcela..."
-                               value="{% if target_installment_mode %}{{ target_installment_input|floatformat:2 }}{% endif %}"
-                               style="max-width:200px;font-weight:700;font-size:1rem;border-radius:8px;"
-                               inputmode="decimal" oninput="maskCurrency(this)">
-                        <button type="button" class="btn-a dark" style="padding:.35rem .8rem;font-size:.8rem;" onclick="applyTargetInstallment()">
-                          <i class="fa-solid fa-calculator"></i>Calcular
-                        </button>
-                        {% if target_installment_mode %}
-                        <button type="button" class="btn-a secondary" style="padding:.35rem .6rem;font-size:.8rem;" onclick="clearTargetInstallment()">
-                          <i class="fa-solid fa-xmark"></i>
-                        </button>
-                        {% endif %}
-                      </div>
-                      {% if target_installment_mode %}
-                      <div style="font-size:.75rem;color:var(--green);margin-top:.35rem;">
-                        <i class="fa-solid fa-check-circle me-1"></i>
-                        Condições ajustadas para parcela de R$ {{ target_installment_input|floatformat:2 }}
-                      </div>
-                      {% endif %}
-                    </div>
-                  </div>
-                </div>
 
                 <!-- Commissions -->
                 {% if can_view_commission %}
@@ -959,6 +895,11 @@ function onInst2Change(val) {
 function toggleSplitMode() {
   var on = document.getElementById('chk-split').checked;
   document.getElementById('split-panel').style.display = on ? 'block' : 'none';
+  var amtWrap = document.getElementById('split-amount-wrap');
+  if (amtWrap) amtWrap.style.display = on ? 'block' : 'none';
+  // Esconde o card de "Entrada à vista" quando o modo Entrada Financiada estiver ativo
+  var dpCard = document.getElementById('dp-calc-card');
+  if (dpCard) dpCard.style.display = on ? 'none' : '';
   var m1 = document.getElementById('method1-wrap');
   var hdr = document.getElementById('method1-hdr');
   // Ajuste de Preço card: show/hide per-method sliders
@@ -968,8 +909,9 @@ function toggleSplitMode() {
     m1.style.border = '1.5px solid var(--brand)';
     m1.style.borderRadius = '10px';
     m1.style.padding = '.75rem .9rem';
-    m1.style.marginBottom = '.5rem';
+    m1.style.marginBottom = '0';
     hdr.style.display = 'flex';
+    document.getElementById('lbl-method1-forma').innerHTML = '<i class="fa-solid fa-wallet me-1"></i>Forma da Entrada';
     // method 1 slider visibility + both-cards logic handled by _updateInc1Visibility
     _updateInc1Visibility();
   } else {
@@ -978,6 +920,7 @@ function toggleSplitMode() {
     m1.style.padding = '';
     m1.style.marginBottom = '';
     hdr.style.display = 'none';
+    document.getElementById('lbl-method1-forma').innerHTML = '<i class="fa-solid fa-wallet me-1"></i>Forma';
     if (inc2) inc2.style.display = 'none';
     if (inc1) { inc1.style.display = 'block'; inc1.dataset.splitBothCards = '0'; }
     var ajTitle = document.getElementById('lbl-ajuste-title');
@@ -1028,6 +971,19 @@ function _updateInc1Visibility() {
 function onSplitAmountChange(rawVal) {
   var amt = parseBRL(rawVal);
   document.getElementById('h-split-amount').value = amt > 0 ? amt.toFixed(2) : '';
+  // Atualiza o label "Restante" ao lado do input de forma síncrona
+  var lbl = document.getElementById('split-remainder-lbl');
+  if (lbl) {
+    var totalEl = document.getElementById('h-final-total') || document.getElementById('h-total');
+    // tenta ler o total do campo oculto; se não existir, deixa o servidor atualizar
+    var serverFinal = parseFloat('{{ final_total|default:"0" }}') || 0;
+    if (amt > 0 && serverFinal > 0) {
+      var rest = Math.max(0, serverFinal - amt);
+      lbl.textContent = 'R$ ' + rest.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+    } else {
+      lbl.textContent = '—';
+    }
+  }
   scheduleSubmit();
 }
 
@@ -1079,11 +1035,9 @@ function updateFee2Display(inst) {
   var d = document.getElementById('fee2-display'); if (d) d.textContent = fee.toFixed(2) + '%';
 }
 
-var submitTimer = null, pendingTargetFinal = '', pendingTargetInstallment = '';
+var submitTimer = null;
 
 function scheduleSubmit() {
-  pendingTargetFinal = '';
-  pendingTargetInstallment = '';
   clearTimeout(submitTimer);
   submitTimer = setTimeout(doSubmit, 400);
 }
@@ -1118,8 +1072,6 @@ function doSubmit() {
   fd.append('sim_payment_type',         document.getElementById('sel-ptype').value);
   fd.append('sim_has_architect',        document.getElementById('chk-architect').checked ? '1' : '0');
   if (archId) fd.append('sim_architect_id', archId);
-  if (pendingTargetFinal) fd.append('target_final', pendingTargetFinal);
-  if (pendingTargetInstallment) fd.append('target_installment', pendingTargetInstallment);
   // down payment
   var dpHidVal = document.getElementById('h-down-payment');
   if (dpHidVal && dpHidVal.value) fd.append('down_payment_value', dpHidVal.value);
@@ -1192,6 +1144,14 @@ function applyZones(html) {
     var newDpFin = doc.getElementById('dp-server-fin');
     var curDpFin = document.getElementById('dp-live-fin');
     if (newDpFin && curDpFin) curDpFin.textContent = newDpFin.textContent;
+    // Atualiza label "Restante" ao lado do input de valor da entrada (split mode)
+    var remLbl = document.getElementById('split-remainder-lbl');
+    if (remLbl && sd.dataset.splitRemainder !== undefined) {
+      var remVal = parseFloat(sd.dataset.splitRemainder);
+      remLbl.textContent = remVal > 0
+        ? 'R$\u00a0' + remVal.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2})
+        : '—';
+    }
     var nowExceeded = sd.dataset.marginExceeded === '1';
     var nowBlocked = sd.dataset.marginLimitExceeded === '1';
     if (nowBlocked && !_prevBlocked) showMarginToast('O custo total ultrapassou o limite de margem. Ajuste as condições.');
@@ -1199,37 +1159,6 @@ function applyZones(html) {
     _prevMarginExceeded = nowExceeded;
     _prevBlocked = nowBlocked;
   }
-}
-
-function applyTargetFinal() {
-  var inp = document.getElementById('target-final-input');
-  var val = inp.value.replace(/\./g, '').replace(',', '.').trim();
-  if (!val || isNaN(parseFloat(val)) || parseFloat(val) <= 0) { inp.focus(); return; }
-  pendingTargetFinal = val; doSubmit();
-}
-
-function clearTargetFinal() {
-  document.getElementById('target-final-input').value = '';
-  pendingTargetFinal = ''; scheduleSubmit();
-}
-
-function applyTargetInstallment() {
-  var inp = document.getElementById('target-installment-input');
-  var val = inp.value.replace(/\./g, '').replace(',', '.').trim();
-  if (!val || isNaN(parseFloat(val)) || parseFloat(val) <= 0) { inp.focus(); return; }
-  pendingTargetInstallment = val; doSubmit();
-}
-
-function clearTargetInstallment() {
-  document.getElementById('target-installment-input').value = '';
-  pendingTargetInstallment = ''; scheduleSubmit();
-}
-
-function toggleInstallmentTarget() {
-  var pt = document.getElementById('sel-ptype').value;
-  var inst = parseInt(document.getElementById('inst-select').value) || 1;
-  var sec = document.getElementById('target-installment-section');
-  if (sec) sec.style.display = ((pt === 'CREDIT_CARD' || pt === 'BOLETO' || pt === 'CHEQUE') && inst > 1) ? '' : 'none';
 }
 
 /* ── Architect (simulation: toggle only, no name required) ────── */
@@ -1315,9 +1244,10 @@ function clearDpValue() {
 
 function updateDpCalcVisibility() {
   var pt = document.getElementById('sel-ptype').value;
+  var splitOn = document.getElementById('chk-split').checked;
   var isCard = (pt === 'CREDIT_CARD' || pt === 'BOLETO' || pt === 'CHEQUE');
   var card = document.getElementById('dp-calc-card');
-  if (card) card.style.display = isCard ? '' : 'none';
+  if (card) card.style.display = (isCard && !splitOn) ? '' : 'none';
   // When payment type no longer supports down payment, clear it
   if (!isCard) {
     var chk = document.getElementById('chk-dp');
@@ -1439,14 +1369,6 @@ function resetSimulation() {
   formatInitialValue(document.getElementById('input-subtotal'));
   formatInitialValue(document.getElementById('input-freight'));
   {% endif %}
-  formatInitialValue(document.getElementById('target-final-input'));
-  formatInitialValue(document.getElementById('target-installment-input'));
-  document.getElementById('target-final-input').addEventListener('keydown', function(e) {
-    if (e.key === 'Enter') { e.preventDefault(); applyTargetFinal(); }
-  });
-  var tii = document.getElementById('target-installment-input');
-  if (tii) tii.addEventListener('keydown', function(e) { if (e.key === 'Enter') { e.preventDefault(); applyTargetInstallment(); } });
-  toggleInstallmentTarget();
   updateDpCalcVisibility();
 })();
 </script>
