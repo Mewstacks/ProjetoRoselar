@@ -41,6 +41,13 @@ def _is_staff_or_admin(user):
     from accounts.models import Role
     return user.is_superuser or user.role == Role.ADMIN
 
+def _can_access_all_quotes(user):
+    """Admin, Finance e superuser podem ver todos os orçamentos.
+    Finance precisa disso para converter orçamentos em pedidos.
+    """
+    from accounts.models import Role
+    return user.is_superuser or user.role in (Role.ADMIN, Role.FINANCE)
+
 def _is_seller(user):
     from accounts.models import Role
     return user.role == Role.SELLER and not user.is_superuser
@@ -57,7 +64,7 @@ def _can_view_commission(user):
 def _get_quote_or_403(request, quote_id, **extra_filters):
     from django.http import HttpResponseForbidden
     quote = get_object_or_404(Quote, id=quote_id, **extra_filters)
-    if not _is_staff_or_admin(request.user) and quote.seller_id != request.user.id:
+    if not _can_access_all_quotes(request.user) and quote.seller_id != request.user.id:
         return None, HttpResponseForbidden("Acesso negado.")
     return quote, None
 
@@ -245,7 +252,7 @@ def get_architect_commission_api(request: HttpRequest) -> JsonResponse:
 @login_required
 def quote_list(request: HttpRequest) -> HttpResponse:
     quotes = Quote.objects.select_related('customer', 'seller').order_by('-created_at')
-    if not _is_staff_or_admin(request.user):
+    if not _can_access_all_quotes(request.user):
         quotes = quotes.filter(seller=request.user)
     
     search_query = request.GET.get('search', '').strip()
@@ -423,7 +430,7 @@ def quote_detail(request: HttpRequest, quote_id: int) -> HttpResponse:
         .prefetch_related("items", "items__supplier", "orders", "orders__items"),
         id=quote_id,
     )
-    if not _is_staff_or_admin(request.user) and quote.seller_id != request.user.id:
+    if not _can_access_all_quotes(request.user) and quote.seller_id != request.user.id:
         messages.error(request, "Acesso negado.")
         return redirect("sales:quote_list")
 
@@ -435,6 +442,7 @@ def quote_detail(request: HttpRequest, quote_id: int) -> HttpResponse:
         "is_admin": _is_admin(request.user),
         "can_generate_order_pdf": _can_generate_order_pdf(request.user),
         "can_view_supplier_pdf": _is_admin(request.user),
+        "can_view_commission": _can_view_commission(request.user),
     })
 
 @login_required
@@ -444,7 +452,7 @@ def quote_reminders(request: HttpRequest, quote_id: int) -> HttpResponse:
         Quote.objects.select_related("customer", "seller"),
         id=quote_id,
     )
-    if not _is_staff_or_admin(request.user) and quote.seller_id != request.user.id:
+    if not _can_access_all_quotes(request.user) and quote.seller_id != request.user.id:
         messages.error(request, "Acesso negado.")
         return redirect("sales:quote_list")
 
@@ -547,7 +555,7 @@ def quote_convert_to_orders(request: HttpRequest, quote_id: int) -> HttpResponse
         Quote.objects.prefetch_related("items", "items__supplier"),
         id=quote_id,
     )
-    if not _is_staff_or_admin(request.user) and quote.seller_id != request.user.id:
+    if not _can_access_all_quotes(request.user) and quote.seller_id != request.user.id:
         messages.error(request, "Acesso negado.")
         return redirect("sales:quote_list")
 
@@ -715,7 +723,7 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
                      .prefetch_related("items", "items__images"),
         id=quote_id,
     )
-    if not _is_staff_or_admin(request.user) and quote.seller_id != request.user.id:
+    if not _can_access_all_quotes(request.user) and quote.seller_id != request.user.id:
         messages.error(request, "Acesso negado.")
         return redirect("sales:quote_list")
 
@@ -2112,7 +2120,7 @@ def quote_simulate_commission(request: HttpRequest, quote_id: int) -> HttpRespon
     quote = get_object_or_404(
         Quote.objects.select_related('customer', 'seller'), id=quote_id
     )
-    if not _is_staff_or_admin(request.user) and quote.seller_id != request.user.id:
+    if not _can_access_all_quotes(request.user) and quote.seller_id != request.user.id:
         messages.error(request, "Acesso negado.")
         return redirect("sales:quote_list")
 
