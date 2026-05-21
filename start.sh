@@ -18,4 +18,4 @@ python manage.py create_superuser_from_env
 echo "==> Collecting static files"
 python manage.py collectstatic --no-input
 echo "==> Starting gunicorn"
-exec gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+exec gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 4 --timeout 120

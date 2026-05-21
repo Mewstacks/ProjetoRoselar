@@ -18,6 +18,7 @@ from django.db import models
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.views.decorators.cache import cache_page, vary_on_cookie
 from django.views.decorators.http import require_http_methods
 
 from reportlab.lib.pagesizes import A4
@@ -251,6 +252,8 @@ def get_architect_commission_api(request: HttpRequest) -> JsonResponse:
         return JsonResponse({'error': str(e)}, status=500)
 
 @login_required
+@vary_on_cookie
+@cache_page(60 * 5)  # 5 minutes; keyed per session cookie so users never see each other's data
 def quote_list(request: HttpRequest) -> HttpResponse:
     quotes = Quote.objects.select_related('customer', 'seller').order_by('-created_at')
     if not _can_access_all_quotes(request.user):
@@ -1291,6 +1294,8 @@ def quote_pdf_supplier(request: HttpRequest, quote_id: int) -> HttpResponse:
     return response
 
 @login_required
+@vary_on_cookie
+@cache_page(60 * 5)  # 5 minutes; keyed per session cookie so users never see each other's data
 def order_list(request: HttpRequest) -> HttpResponse:
     orders = Order.objects.select_related('quote', 'supplier', 'quote__customer', 'quote__seller').order_by('-created_at')
     if not _can_view_all_orders(request.user):
