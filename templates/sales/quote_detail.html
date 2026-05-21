@@ -133,7 +133,11 @@
     .status-SENT      { background: #e3f2fd; color: #0c5276; }
     .status-APPROVED  { background: #e8f5e9; color: #0f5132; }
     .status-CONVERTED { background: #e3f2fd; color: var(--blue); }
+    .status-POS_VENDA { background: #f3e8ff; color: #6b21a8; }
     .status-CANCELED  { background: #fce4ec; color: #842029; }
+    .status-PENDING   { background: #fff8e1; color: #b45309; }
+    .status-ONGOING   { background: #e8f4fd; color: #0a6cb0; }
+    .status-DONE      { background: #e8f5e9; color: #0f5132; }
 
     /* ── Quote info strip ── */
     .q-info {
@@ -487,7 +491,7 @@
                         {% endif %}
                       </td>
                       <td style="text-align:center;">
-                        <span class="status-badge status-SENT">{{ order.get_status_display }}</span>
+                        <span class="status-badge status-{{ order.status }}">{{ order.get_status_display }}</span>
                       </td>
                       <td style="text-align:center;font-weight:600;">{{ order.items.count }}</td>
                       <td style="text-align:right;">
@@ -513,7 +517,7 @@
             <div class="alert-convert fi fi-5">
               <div class="ac-text">
                 <i class="fa-solid fa-info-circle me-2"></i>
-                <strong>Pronto para converter?</strong> Transforme este orçamento em pedido — o financeiro receberá uma notificação para baixar os PDFs dos fornecedores e definir a data de entrega.
+                <strong>Pronto para converter?</strong> Transforme este orçamento em pedido — o financeiro receberá uma notificação para revisar e aprovar.
               </div>
               <button type="button" class="btn-a primary" data-bs-toggle="modal" data-bs-target="#convertModal">
                 <i class="fa-solid fa-exchange-alt"></i>Converter em Pedido
@@ -538,7 +542,7 @@
                       </p>
                       <div style="background:#f0f7ff;border-radius:8px;padding:.75rem 1rem;font-size:.82rem;color:#0c5276;border:1px solid #b6d8f2;">
                         <i class="fa-solid fa-circle-info me-2"></i>
-                        Após a conversão, o <strong>financeiro</strong> receberá uma notificação, baixará os PDFs de compra para cada fornecedor e definirá a data de entrega — gerando lembretes automáticos para você e para ele.
+                        Após a conversão, o <strong>financeiro</strong> receberá uma notificação. Ele revisará, aprovará o pedido, baixará os PDFs de compra por fornecedor e definirá a data de entrega — gerando lembretes automáticos para você e para ele.
                       </div>
                       {% if quote.delivery_days_min or quote.delivery_days_max %}
                         <div style="margin-top:.65rem;font-size:.81rem;color:var(--muted);">

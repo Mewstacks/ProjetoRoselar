@@ -325,6 +325,32 @@
       </div>
 
       <!-- ═══════════ MAIN CONTENT ═══════════ -->
+
+      <!-- Finance pending-orders alert banner -->
+      {% if user.is_authenticated and pending_orders_count %}
+      <div style="background:#fff8e1;border-bottom:3px solid #f59e0b;padding:.75rem 0;">
+        <div class="container d-flex align-items-center justify-content-between gap-3 flex-wrap">
+          <div style="display:flex;align-items:center;gap:.65rem;">
+            <span style="background:#f59e0b;color:#fff;width:34px;height:34px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;font-size:.95rem;">
+              <i class="fa-solid fa-bell"></i>
+            </span>
+            <div>
+              <strong style="color:#78350f;font-size:.9rem;">
+                {{ pending_orders_count }} pedido{{ pending_orders_count|pluralize }} aguardando aprovação
+              </strong>
+              <div style="font-size:.76rem;color:#92400e;">
+                Orçamentos convertidos que precisam da sua revisão e aprovação.
+              </div>
+            </div>
+          </div>
+          <a href="{% url 'sales:order_list' %}?status=PENDING"
+             style="background:#f59e0b;color:#fff;padding:.45rem 1.1rem;border-radius:8px;font-weight:700;font-size:.82rem;text-decoration:none;white-space:nowrap;display:inline-flex;align-items:center;gap:.4rem;flex-shrink:0;">
+            <i class="fa-solid fa-arrow-right"></i>Ver Pedidos
+          </a>
+        </div>
+      </div>
+      {% endif %}
+
       {% if user.is_authenticated and is_admin %}
       <section style="padding:2.5rem 0 3rem;background:var(--bg);">
         <div class="container">

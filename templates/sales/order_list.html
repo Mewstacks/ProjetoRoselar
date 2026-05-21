@@ -86,6 +86,8 @@
     }
     .status-OPEN     { background: #e3f2fd; color: var(--cyan); }
     .status-SENT     { background: #e3f2fd; color: var(--blue); }
+    .status-PENDING  { background: #fff8e1; color: #b45309; }
+    .status-ONGOING  { background: #e8f4fd; color: #0a6cb0; }
     .status-DONE     { background: #e8f5e9; color: #0f5132; }
     .status-CANCELED { background: #fce4ec; color: #842029; }
 
@@ -243,10 +245,13 @@
                 <div class="col-md-3">
                   <select name="status" class="search-select">
                     <option value="">Todos os Status</option>
-                    <option value="OPEN" {% if status_filter == "OPEN" %}selected{% endif %}>Aberto</option>
-                    <option value="SENT" {% if status_filter == "SENT" %}selected{% endif %}>Enviado</option>
+                    <option value="PENDING" {% if status_filter == "PENDING" %}selected{% endif %}>Aguardando Aprovação</option>
+                    <option value="ONGOING" {% if status_filter == "ONGOING" %}selected{% endif %}>Em Andamento</option>
                     <option value="DONE" {% if status_filter == "DONE" %}selected{% endif %}>Concluído</option>
                     <option value="CANCELED" {% if status_filter == "CANCELED" %}selected{% endif %}>Cancelado</option>
+                    <option disabled style="color:#9ca3af;">── Legado ──</option>
+                    <option value="OPEN" {% if status_filter == "OPEN" %}selected{% endif %} style="color:#9ca3af;">Aberto (legado)</option>
+                    <option value="SENT" {% if status_filter == "SENT" %}selected{% endif %} style="color:#9ca3af;">Enviado (legado)</option>
                   </select>
                 </div>
                 <div class="col-md-3">

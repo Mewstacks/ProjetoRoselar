@@ -109,6 +109,8 @@
     }
     .status-OPEN     { background: #e3f2fd; color: var(--cyan); }
     .status-SENT     { background: #e3f2fd; color: var(--blue); }
+    .status-PENDING  { background: #fff8e1; color: #b45309; }
+    .status-ONGOING  { background: #e8f4fd; color: #0a6cb0; }
     .status-DONE     { background: #e8f5e9; color: #0f5132; }
     .status-CANCELED { background: #fce4ec; color: #842029; }
 
@@ -283,6 +285,31 @@
           </div>
           <div class="s-body">
 
+            {% if order.status == "PENDING" %}
+            <!-- ─ FASE 1: Aguardando aprovação ─ -->
+            <div style="background:#fff8e1;border:1px solid #f5c27a;border-radius:8px;padding:.75rem 1rem;font-size:.84rem;color:#78350f;margin-bottom:1rem;display:flex;align-items:center;gap:.6rem;">
+              <i class="fa-solid fa-clock" style="font-size:1rem;flex-shrink:0;"></i>
+              <div>
+                <strong>Aguardando aprovação.</strong>
+                Revise o orçamento e aprove para iniciar a compra dos fornecedores.
+              </div>
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+              <a href="{% url 'sales:quote_detail' order.quote.id %}" class="btn-a info">
+                <i class="fa-solid fa-file-invoice"></i>Ver Orçamento
+              </a>
+              {% if can_approve_order %}
+                <form method="post" action="{% url 'sales:order_approve' order.id %}" style="display:inline;" onsubmit="return confirm('Aprovar este pedido e colocar em andamento?')">
+                  {% csrf_token %}
+                  <button type="submit" class="btn-a" style="background:#0a6cb0;color:#fff;">
+                    <i class="fa-solid fa-circle-check"></i>Aprovar Pedido
+                  </button>
+                </form>
+              {% endif %}
+            </div>
+
+            {% elif order.status == "ONGOING" %}
+            <!-- ─ FASE 2: Em andamento — entrega + conclusão ─ -->
             {% if not order.delivery_deadline %}
               <div style="background:#fff8f0;border:1px solid #f5c27a;border-radius:8px;padding:.7rem 1rem;font-size:.84rem;color:#7a4f00;margin-bottom:1rem;">
                 <i class="fa-solid fa-triangle-exclamation me-2"></i>
@@ -291,13 +318,12 @@
             {% else %}
               <div style="background:#e8f5e9;border:1px solid #a3cfbb;border-radius:8px;padding:.7rem 1rem;font-size:.84rem;color:#0f5132;margin-bottom:1rem;">
                 <i class="fa-solid fa-circle-check me-2"></i>
-                Data de entrega definida: <strong>{{ order.delivery_deadline|date:"d/m/Y" }}</strong>
+                Data de entrega: <strong>{{ order.delivery_deadline|date:"d/m/Y" }}</strong>
                 <span style="font-size:.78rem;color:var(--muted);margin-left:.5rem;">— clique para alterar</span>
               </div>
             {% endif %}
 
             <div class="d-flex flex-wrap gap-2">
-              <!-- Botões de PDF por fornecedor -->
               {% for sup_order in supplier_orders %}
                 <a href="{% url 'sales:order_pdf' sup_order.id %}" class="btn-a dark" target="_blank">
                   <i class="fa-solid fa-file-pdf"></i>PDF — {{ sup_order.supplier.name }}
@@ -306,12 +332,28 @@
                 <span style="font-size:.82rem;color:var(--muted);">Nenhum pedido por fornecedor encontrado.</span>
               {% endfor %}
 
-              <!-- Botão definir data de entrega -->
               <button type="button" class="btn-a primary" data-bs-toggle="modal" data-bs-target="#deliveryModal">
                 <i class="fa-solid fa-calendar-check"></i>
                 {% if order.delivery_deadline %}Alterar Data de Entrega{% else %}Definir Data de Entrega{% endif %}
               </button>
+
+              {% if can_conclude_order %}
+                {% if order.delivery_deadline %}
+                  <form method="post" action="{% url 'sales:order_conclude' order.id %}" style="display:inline;" onsubmit="return confirm('Marcar pedido como Concluído? O vendedor será notificado para fazer o pós-venda.')">
+                    {% csrf_token %}
+                    <button type="submit" class="btn-a primary">
+                      <i class="fa-solid fa-flag-checkered"></i>Concluir Pedido
+                    </button>
+                  </form>
+                {% else %}
+                  <button class="btn-a" style="background:#9ca3af;color:#fff;cursor:not-allowed;" disabled title="Defina a data de entrega primeiro">
+                    <i class="fa-solid fa-flag-checkered"></i>Concluir Pedido
+                  </button>
+                {% endif %}
+              {% endif %}
             </div>
+
+            {% endif %}
           </div>
         </div>
 
