@@ -1808,7 +1808,7 @@ def _run_simulation(
     """Motor de Margem Unificado.
 
     Recebe freight_value JÁ com markup por dentro (calculado em _build_simulation_context).
-    Comissão interpolada linearmente entre 2% (MLD=0) e 5% (MLD≥12%).
+    Comissão interpolada linearmente: [2%, 5%] para PIX/Dinheiro, [2%, 4%] para cartão e demais.
     Status: VERMELHO se MLD<0, AMARELO se 0≤MLD<2, VERDE se MLD≥2.
     """
     from decimal import ROUND_HALF_UP
@@ -1856,16 +1856,22 @@ def _run_simulation(
     max_parcelas       = 1
     maior_valor        = Decimal('-1')
 
-    if payment_methods and valor_a_financiar > 0:
+    # Determina metodo_principal pela maior perna (independente de ter financiamento)
+    # Importante: não pode cair em 'PIX' só porque valor_a_financiar=0 (entrada total),
+    # pois isso daria teto de comissão errado (5% em vez de 4% para cartão).
+    if payment_methods:
         for metodo in payment_methods:
             metodo_value = Decimal(str(metodo.get('value') or 0))
-            metodo_fee   = Decimal(str(metodo.get('fee_pct') or 0))
             metodo_inst  = int(metodo.get('installments') or 1)
-
             if metodo_value > maior_valor:
                 maior_valor      = metodo_value
                 metodo_principal = metodo.get('type')
                 max_parcelas     = metodo_inst
+
+    if payment_methods and valor_a_financiar > 0:
+        for metodo in payment_methods:
+            metodo_value = Decimal(str(metodo.get('value') or 0))
+            metodo_fee   = Decimal(str(metodo.get('fee_pct') or 0))
 
             proporcao = (metodo_value / valor_total_venda) if valor_total_venda > 0 else Decimal('0')
             valor_real_financiado_neste_metodo = valor_a_financiar * proporcao
@@ -1876,7 +1882,7 @@ def _run_simulation(
             if valor_total_venda > 0:
                 proporcao_frete    = freight_value / valor_total_venda
                 juros_so_do_frete += juros_metodo * proporcao_frete
-    else:
+    elif not payment_methods:
         metodo_principal = 'PIX'
         max_parcelas     = 1
 
@@ -1960,7 +1966,6 @@ def _build_simulation_context(
     MAX_DISCOUNT_ABSOLUTE = Decimal("30")
     MARGIN_BASE      = Decimal("12")
     COMMISSION_FLOOR = Decimal("2")
-    COMMISSION_MAX   = Decimal("5")
     ARQUITETO_PCT    = Decimal("5")  # 5% sobre valor ajustado líquido da margem de 12%
 
     # Higienização de Inputs
@@ -2104,7 +2109,10 @@ def _build_simulation_context(
         installment_value_2 = Decimal("0")
 
     installment_value = installment_value_1 if not split_mode else Decimal("0")
-    valor_avista = adj_subtotal - discount_value
+
+    # Base real da comissão do arquiteto: subtotal ajustado menos a margem da loja (12%).
+    # NÃO subtrair discount_value — adj_subtotal já veio com o desconto aplicado pelo motor.
+    valor_avista = adj_subtotal * (Decimal("1") - Decimal("0.12"))
 
     # ---- Descrições amigáveis ----
     pt_choices_dict = dict(PaymentMethodType.choices)
@@ -2148,13 +2156,19 @@ def _build_simulation_context(
     controls_blocked = resultado['controls_blocked']
 
     _AVISTA_TYPES = {'PIX', 'CASH', 'DEBIT_CARD', 'CHEQUE', 'BOLETO'}
-    split_m1_avista = split_mode and sim_payment_type   in _AVISTA_TYPES
-    split_m2_avista = split_mode and sim_payment_type_2 in _AVISTA_TYPES
+    split_m1_avista  = split_mode and sim_payment_type   in _AVISTA_TYPES
+    split_m2_avista  = split_mode and sim_payment_type_2 in _AVISTA_TYPES
     split_both_cards = split_mode and not split_m1_avista and not split_m2_avista
 
     seller_commission_percent = resultado['seller']['commission_pct']
     seller_commission_value   = resultado['seller']['commission_value']
     sacrifice_active          = resultado['seller']['sacrifice_active']
+
+    # Teto real de comissão depende do método principal da venda.
+    # PIX/CASH → 5%, todo o resto (cartão, débito, boleto, cheque) → 4%.
+    _AVISTA_COMM = {'PIX', 'CASH'}
+    _main_method_for_comm = resultado.get('main_method') or sim_payment_type or ''
+    commission_max_actual = Decimal('5') if _main_method_for_comm in _AVISTA_COMM else Decimal('4')
 
     blended_fee_pct = (
         (payment_fee_value / financed_value * Decimal("100"))
@@ -2176,6 +2190,7 @@ def _build_simulation_context(
         'sim_split_amount':         sim_split_amount,
         'split_mode':               split_mode,
         'split_m1_avista':          split_m1_avista,
+        'split_m2_avista':          split_m2_avista,
         'split_both_cards':         split_both_cards,
         'down_payment_value':       down_payment_used,
         'dp_min_value':             dp_min_value,
@@ -2211,9 +2226,9 @@ def _build_simulation_context(
         # Vendedor / Arquiteto
         'seller_commission_percent':   seller_commission_percent,
         'seller_commission_value':     seller_commission_value,
-        'original_commission_percent': COMMISSION_MAX,
+        'original_commission_percent': commission_max_actual,
         'commission_floor':            COMMISSION_FLOOR,
-        'commission_max':              COMMISSION_MAX,
+        'commission_max':              commission_max_actual,
         'commission_reduced':          sacrifice_active,
         'architect_percent':           ARQUITETO_PCT,
         'architect_commission_value':  architect_value,
