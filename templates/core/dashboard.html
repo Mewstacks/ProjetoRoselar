@@ -36,6 +36,17 @@
     .mini-table th, .mini-table td { padding: .4rem .6rem; border-bottom: 1px solid #eee; }
     .mini-table th { color: var(--gray); font-weight: 600; text-transform: uppercase; font-size: .7rem; }
     .badge-notif { background: var(--red); color: #fff; font-size: .65rem; padding: 2px 6px; border-radius: 99px; position: absolute; top: -4px; right: -4px; }
+
+    /* ── Section body: allow horizontal scroll on any inner table ── */
+    .section-body { overflow-x: auto; }
+
+    /* ── Responsive ── */
+    @media (max-width: 768px) {
+      .mini-table { font-size: .78rem; }
+      .mini-table th, .mini-table td { padding: .3rem .45rem; }
+      .metric-card { padding: 1rem; }
+      .metric-card .value { font-size: 1.25rem; }
+    }
   </style>
 </head>
 <body>

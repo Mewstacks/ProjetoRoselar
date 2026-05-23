@@ -16,3 +16,15 @@
   }
 }
 
+/* Flowbite dropdown: prevents overflow on narrow screens (< 320px) */
+#dropdownUser {
+  max-width: calc(100vw - 1rem) !important;
+}
+
+/* Global: label font-size floor – prevents sub-12px text on mobile */
+@media (max-width: 576px) {
+  .stat-l, .f-label, .hi .hi-l {
+    font-size: .72rem !important;
+  }
+}
+
