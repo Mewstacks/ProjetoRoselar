@@ -1963,14 +1963,33 @@ def _run_simulation(
     lucro_sobra         = (budget_loja + gordura_acrescimo) - custos_operacionais
     mld_pct = (lucro_sobra / subtotal) * Decimal('100') if subtotal > Decimal('0') else Decimal('0')
 
-    # 5. Comissão linear blindada: [2%, 5%] para PIX/Dinheiro, [2%, 4%] para cartão e demais
+    # 5. Comissão por tipo de pagamento (conforme LOGICA_SIMULADOR.txt)
+    #    PIX / CASH (Dinheiro):         dinâmico, clamp(mld, 2%, 5%)
+    #    Débito:                        4% fixo
+    #    Crédito/Boleto 1x–6x:          3% fixo
+    #    Crédito/Boleto 7x+:            dinâmico, clamp(mld, 2%, 4%)
+    #    Cheque / outros:               dinâmico, clamp(mld, 2%, 4%)
     sacrificio_ativo = False
-    mld_clamp = max(Decimal('0'), min(mld_pct, Decimal('12')))
-    _avista_types = {'CASH', 'PIX'}
-    _comm_teto = Decimal('3') if metodo_principal in _avista_types else Decimal('2')
-    comissao_final = (Decimal('2') + (mld_clamp / Decimal('12')) * _comm_teto).quantize(
-        Decimal('0.01'), rounding=ROUND_HALF_UP
-    )
+    _AVISTA_5    = {'CASH', 'PIX'}        # único teto 5%
+    _DEBIT_COMM  = {'DEBIT_CARD'}
+    _CREDIT_BOLETO = {'CREDIT_CARD', 'BOLETO'}
+
+    if metodo_principal in _AVISTA_5:
+        comissao_final = max(Decimal('2'), min(mld_pct, Decimal('5')))
+    elif metodo_principal in _DEBIT_COMM:
+        comissao_final = Decimal('4')
+    elif metodo_principal in _CREDIT_BOLETO:
+        if max_parcelas >= 7:
+            # 7x+: dinâmico, teto 4%
+            comissao_final = max(Decimal('2'), min(mld_pct, Decimal('4')))
+        else:
+            # 1x–6x: fixo 3%
+            comissao_final = Decimal('3')
+    else:
+        # Cheque, sem forma selecionada, etc.: dinâmico, teto 4%
+        comissao_final = max(Decimal('2'), min(mld_pct, Decimal('4')))
+
+    comissao_final = comissao_final.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
     if mld_pct < Decimal('0'):
         status_simulacao = "VERMELHO"
@@ -2233,10 +2252,16 @@ def _build_simulation_context(
     sacrifice_active          = resultado['seller']['sacrifice_active']
 
     # Teto real de comissão depende do método principal da venda.
-    # PIX/CASH → 5%, todo o resto (cartão, débito, boleto, cheque) → 4%.
-    _AVISTA_COMM = {'PIX', 'CASH'}
+    # PIX/CASH → 5%, Débito → 4%, Crédito/Boleto 1x-6x → 3%, Crédito/Boleto 7x+ → 4%, outros → 4%
+    _AVISTA_COMM_5 = {'PIX', 'CASH'}
     _main_method_for_comm = resultado.get('main_method') or sim_payment_type or ''
-    commission_max_actual = Decimal('5') if _main_method_for_comm in _AVISTA_COMM else Decimal('4')
+    _main_inst = resultado.get('max_parcelas') or sim_installments or 1
+    if _main_method_for_comm in _AVISTA_COMM_5:
+        commission_max_actual = Decimal('5')
+    elif _main_method_for_comm in {'CREDIT_CARD', 'BOLETO'} and _main_inst < 7:
+        commission_max_actual = Decimal('3')
+    else:
+        commission_max_actual = Decimal('4')
 
     blended_fee_pct = (
         (payment_fee_value / financed_value * Decimal("100"))
