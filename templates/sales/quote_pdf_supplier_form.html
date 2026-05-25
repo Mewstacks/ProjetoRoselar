@@ -1,0 +1,219 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="pt-BR" dir="ltr">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PDF Fornecedor – Orçamento #{{ quote.number }} | Roselar</title>
+  <link rel="apple-touch-icon" sizes="180x180" href="{% static 'assets/img/favicons/apple-touch-icon.png' %}">
+  <link rel="icon" type="image/png" sizes="32x32" href="{% static 'assets/img/favicons/favicon-32x32.png' %}">
+  <link rel="shortcut icon" type="image/x-icon" href="{% static 'assets/img/favicons/favicon.ico' %}">
+  <link rel="preconnect" href="https://fonts.gstatic.com">
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="{% static 'assets/css/theme.css' %}" rel="stylesheet">
+  <link href="{% static 'assets/css/user.css' %}" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+
+  <style>
+    :root {
+      --brand:   #0A2640;
+      --brand-l: #163a5a;
+      --bg:      #f4f6f9;
+      --surface: #fff;
+      --green:   #198754;
+      --red:     #dc3545;
+      --muted:   #6c757d;
+      --border:  #dee2e6;
+      --radius:  10px;
+      --shadow:  0 1px 4px rgba(0,0,0,.06);
+      --shadow-h:0 4px 14px rgba(0,0,0,.09);
+    }
+    * { box-sizing: border-box; }
+    body { font-family: 'Manrope', sans-serif; background: var(--bg); }
+
+    .s-card {
+      background: var(--surface); border-radius: var(--radius);
+      box-shadow: var(--shadow); margin-bottom: 1rem;
+      border: 1px solid rgba(0,0,0,.04);
+    }
+    .s-hdr {
+      padding: .75rem 1.2rem; display: flex; align-items: center; gap: .55rem;
+      font-weight: 700; font-size: .9rem; color: var(--brand);
+      background: #fafbfc; border-bottom: 1px solid var(--border);
+      border-radius: var(--radius) var(--radius) 0 0;
+    }
+    .s-icon {
+      width: 30px; height: 30px; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: .78rem; color: #fff; flex-shrink: 0;
+    }
+    .s-icon.brand { background: var(--brand); }
+    .s-icon.green { background: var(--green); }
+    .s-body { padding: 1.2rem; }
+
+    .f-label {
+      display: block; font-size: .72rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .05em;
+      color: var(--muted); margin-bottom: .4rem;
+    }
+    .f-input, .f-textarea {
+      width: 100%; padding: .55rem .9rem;
+      font-family: 'Manrope', sans-serif;
+      font-size: .9rem; font-weight: 500; color: var(--brand);
+      border: 1.5px solid var(--border); border-radius: 8px;
+      background: #fff; transition: border-color .2s, box-shadow .2s;
+    }
+    .f-input:focus, .f-textarea:focus {
+      outline: none;
+      border-color: var(--brand);
+      box-shadow: 0 0 0 3px rgba(10,38,64,.1);
+    }
+    .f-textarea { resize: vertical; min-height: 90px; line-height: 1.5; }
+
+    .btn-a {
+      display: inline-flex; align-items: center; gap: .4rem;
+      padding: .6rem 1.4rem; font-weight: 700; font-size: .88rem;
+      border: none; border-radius: 8px; cursor: pointer;
+      text-decoration: none; transition: all .2s;
+    }
+    .btn-a:hover { transform: translateY(-1px); box-shadow: var(--shadow-h); }
+    .btn-a.primary { background: var(--green); color: #fff; }
+    .btn-a.primary:hover { background: #146c43; color: #fff; }
+    .btn-a.secondary { background: #fff; color: var(--brand); border: 1.5px solid var(--border); }
+    .btn-a.secondary:hover { background: var(--bg); }
+
+    .info-chip {
+      display: inline-flex; align-items: center; gap: .35rem;
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 6px; padding: .3rem .7rem;
+      font-size: .8rem; font-weight: 600; color: var(--muted);
+    }
+    .info-chip strong { color: var(--brand); }
+
+    .hint {
+      font-size: .75rem; color: var(--muted); margin-top: .3rem; line-height: 1.4;
+    }
+    .hint i { opacity: .7; }
+
+    @keyframes fadeIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+    .fi { animation: fadeIn .35s ease both; }
+    .fi-1 { animation-delay:.06s }
+    .fi-2 { animation-delay:.12s }
+
+    @media (max-width: 576px) {
+      .s-body { padding: .9rem; }
+      .btn-row { flex-direction: column; }
+      .btn-row .btn-a { width: 100%; justify-content: center; }
+    }
+  </style>
+</head>
+<body>
+  <main class="main" id="top">
+    <nav class="navbar navbar-expand-lg fixed-top navbar-dark" data-navbar-on-scroll="data-navbar-on-scroll">
+      <div class="container">
+        <a class="navbar-brand" href="{% url 'core:index' %}">
+          <img src="{% static 'assets/img/Logo.png' %}?v=2" alt="" style="height:40px;">
+        </a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent">
+          <i class="fa-solid fa-bars text-white fs-3"></i>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarSupportedContent">
+          <ul class="navbar-nav ms-auto">
+            <li class="nav-item"><a class="nav-link" href="{% url 'core:index' %}">Início</a></li>
+            <li class="nav-item"><a class="nav-link" href="{% url 'sales:quotes_hub' %}">Orçamentos</a></li>
+          </ul>
+        </div>
+      </div>
+    </nav>
+
+    <section class="py-5" style="min-height:100vh;">
+      <div style="position:absolute;top:0;left:0;right:0;height:30vh;
+                   background:linear-gradient(135deg,var(--brand),var(--brand-l));z-index:-1;"></div>
+
+      <div class="container" style="margin-top:80px;max-width:640px;">
+
+        <!-- Header card -->
+        <div class="s-card fi" style="border:none;box-shadow:var(--shadow-h);">
+          <div class="s-body" style="padding:1.2rem 1.4rem;">
+            <div class="d-flex align-items-center gap-3 mb-3">
+              <div style="width:44px;height:44px;border-radius:10px;background:var(--brand);color:#fff;
+                          display:flex;align-items:center;justify-content:center;font-size:1.2rem;">
+                <i class="fa-solid fa-file-pdf"></i>
+              </div>
+              <div>
+                <h5 style="margin:0;font-weight:800;color:var(--brand);">PDF de Fornecedor</h5>
+                <div style="font-size:.8rem;color:var(--muted);">
+                  Preencha as informações antes de baixar o PDF
+                </div>
+              </div>
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+              <span class="info-chip"><i class="fa-solid fa-hashtag"></i><strong>#{{ quote.number }}</strong></span>
+              <span class="info-chip"><i class="fa-solid fa-user"></i>{{ quote.customer.name }}</span>
+              <span class="info-chip"><i class="fa-solid fa-calendar"></i>{{ quote.quote_date|date:"d/m/Y" }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Form card -->
+        <div class="s-card fi fi-1">
+          <div class="s-hdr">
+            <div class="s-icon brand"><i class="fa-solid fa-pen-to-square"></i></div>
+            Dados do Pedido de Compra
+          </div>
+          <div class="s-body">
+            <form method="post" action="">
+              {% csrf_token %}
+
+              <div class="row g-3 mb-3">
+                <div class="col-md-6">
+                  <label class="f-label" for="id_transportadora">
+                    <i class="fa-solid fa-truck me-1"></i>Transportadora
+                  </label>
+                  <input type="text" id="id_transportadora" name="transportadora"
+                         class="f-input" placeholder="Ex: Transportes ABC, A Combinar…"
+                         maxlength="120" autocomplete="off">
+                  <p class="hint"><i class="fa-solid fa-circle-info me-1"></i>Deixe em branco para exibir "—" no PDF.</p>
+                </div>
+                <div class="col-md-6">
+                  <label class="f-label" for="id_cond_pagamento">
+                    <i class="fa-solid fa-money-check-dollar me-1"></i>Condição de Pagamento
+                  </label>
+                  <input type="text" id="id_cond_pagamento" name="cond_pagamento"
+                         class="f-input" placeholder="Ex: 28 DDL, Boleto 30/60, À vista…"
+                         maxlength="120" autocomplete="off">
+                  <p class="hint"><i class="fa-solid fa-circle-info me-1"></i>Deixe em branco para exibir "—" no PDF.</p>
+                </div>
+              </div>
+
+              <div class="mb-4">
+                <label class="f-label" for="id_observacoes">
+                  <i class="fa-solid fa-comment-dots me-1"></i>Observações
+                </label>
+                <textarea id="id_observacoes" name="observacoes"
+                          class="f-textarea"
+                          placeholder="Ex: Produtos devem ser embalados individualmente. Contato na entrega: João – (11) 99999-9999."
+                          maxlength="600"></textarea>
+                <p class="hint"><i class="fa-solid fa-circle-info me-1"></i>Será exibido em um bloco destacado no PDF. Deixe vazio para omitir.</p>
+              </div>
+
+              <div class="d-flex flex-wrap gap-2 btn-row">
+                <button type="submit" class="btn-a primary">
+                  <i class="fa-solid fa-download"></i>Gerar e Baixar PDF
+                </button>
+                <a href="{% url 'sales:quote_detail' quote.id %}" class="btn-a secondary">
+                  <i class="fa-solid fa-arrow-left"></i>Voltar
+                </a>
+              </div>
+            </form>
+          </div>
+        </div>
+
+      </div>
+    </section>
+  </main>
+
+  <script src="{% static 'assets/js/theme.js' %}"></script>
+</body>
+</html>

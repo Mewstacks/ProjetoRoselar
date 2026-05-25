@@ -1079,6 +1079,14 @@ def quote_pdf_supplier(request: HttpRequest, quote_id: int) -> HttpResponse:
         messages.error(request, "Apenas administradores podem baixar o PDF de fornecedor.")
         return redirect("sales:quote_detail", quote_id=quote.id)
 
+    # GET → exibe formulário com os 3 campos manuais antes de gerar o PDF
+    if request.method != "POST":
+        return render(request, "sales/quote_pdf_supplier_form.html", {"quote": quote})
+
+    transportadora = request.POST.get("transportadora", "").strip()
+    cond_pagamento = request.POST.get("cond_pagamento", "").strip()
+    observacoes    = request.POST.get("observacoes", "").strip()
+
     def _fmt_brl(value) -> str:
         s = f"{float(value):,.2f}"
         return s.replace(',', '\x00').replace('.', ',').replace('\x00', '.')
@@ -1092,7 +1100,10 @@ def quote_pdf_supplier(request: HttpRequest, quote_id: int) -> HttpResponse:
     def _ps(name, **kw):
         return ParagraphStyle(name, parent=_styles['Normal'], **kw)
 
-    def _make_pdf_for_supplier(supplier, items_for_supplier) -> bytes:
+    def _make_pdf_for_supplier(supplier, items_for_supplier,
+                               _transp=transportadora,
+                               _cond=cond_pagamento,
+                               _obs=observacoes) -> bytes:
         st_title   = _ps(f'{supplier.id}_title',  fontSize=15, fontName='Helvetica-Bold',
                          textColor=NAVY, alignment=TA_CENTER, spaceAfter=2)
         st_sub     = _ps(f'{supplier.id}_sub',    fontSize=9, textColor=MUTED,
@@ -1131,6 +1142,10 @@ def quote_pdf_supplier(request: HttpRequest, quote_id: int) -> HttpResponse:
             [
                 Paragraph(f"<b>Vendedor:</b> {seller_name}", st_normal),
                 Paragraph("", st_normal),
+            ],
+            [
+                Paragraph(f"<b>Transportadora:</b> {_transp or '—'}", st_normal),
+                Paragraph(f"<b>Cond. Pagamento:</b> {_cond or '—'}", st_normal),
             ],
         ]
         meta_tbl = Table(meta_data, colWidths=[8.5*cm, 8.5*cm])
@@ -1247,6 +1262,29 @@ def quote_pdf_supplier(request: HttpRequest, quote_id: int) -> HttpResponse:
                 st_normal,
             ))
 
+        if _obs:
+            els.append(Spacer(1, 0.4*cm))
+            st_obs_lbl = _ps(f'{supplier.id}_obs_lbl', fontSize=8, fontName='Helvetica-Bold',
+                             textColor=NAVY, spaceBefore=4, spaceAfter=3)
+            st_obs_txt = _ps(f'{supplier.id}_obs_txt', fontSize=8, leading=12,
+                             textColor=colors.HexColor('#333333'))
+            obs_tbl = Table(
+                [[
+                    [Paragraph("OBSERVAÇÕES", st_obs_lbl),
+                     Paragraph(_obs, st_obs_txt)]
+                ]],
+                colWidths=[17*cm],
+            )
+            obs_tbl.setStyle(TableStyle([
+                ('BOX',           (0, 0), (-1, -1), 0.5, LGRAY),
+                ('BACKGROUND',    (0, 0), (-1, -1), BGROW),
+                ('LEFTPADDING',   (0, 0), (-1, -1), 8),
+                ('RIGHTPADDING',  (0, 0), (-1, -1), 8),
+                ('TOPPADDING',    (0, 0), (-1, -1), 6),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ]))
+            els.append(obs_tbl)
+
         els.append(Spacer(1, 0.8*cm))
         els.append(HRFlowable(width="100%", thickness=0.5, color=LGRAY))
         els.append(Spacer(1, 0.2*cm))
@@ -1282,7 +1320,7 @@ def quote_pdf_supplier(request: HttpRequest, quote_id: int) -> HttpResponse:
     if len(by_supplier) == 1:
         supplier_id, items_list = next(iter(by_supplier.items()))
         supplier = items_list[0].supplier
-        pdf_bytes = _make_pdf_for_supplier(supplier, items_list)
+        pdf_bytes = _make_pdf_for_supplier(supplier, items_list, transportadora, cond_pagamento, observacoes)
         safe_name = supplier.name.replace(' ', '_').replace('/', '_')
         filename = f"pedido_{quote.number}_{safe_name}.pdf"
         response = HttpResponse(pdf_bytes, content_type='application/pdf')
@@ -1293,7 +1331,7 @@ def quote_pdf_supplier(request: HttpRequest, quote_id: int) -> HttpResponse:
     with zipfile_mod.ZipFile(zip_buffer, 'w', zipfile_mod.ZIP_DEFLATED) as zf:
         for supplier_id, items_list in by_supplier.items():
             supplier = items_list[0].supplier
-            pdf_bytes = _make_pdf_for_supplier(supplier, items_list)
+            pdf_bytes = _make_pdf_for_supplier(supplier, items_list, transportadora, cond_pagamento, observacoes)
             safe_name = supplier.name.replace(' ', '_').replace('/', '_')
             zf.writestr(f"pedido_{quote.number}_{safe_name}.pdf", pdf_bytes)
 
