@@ -62,12 +62,12 @@ def _build_month_series(rows, month_starts: list[date_type]) -> tuple[list[str],
 
 
 def _net_quote_value(quote) -> Decimal:
-    """Strips the payment fee from a quote's gross total to get net revenue."""
-    total = quote.total_value_snapshot or Decimal("0")
-    fee_pct = quote.payment_fee_percent or Decimal("0")
-    if fee_pct <= 0:
-        return total
-    return total / (Decimal("1") + fee_pct / Decimal("100"))
+    """Returns the quote's customer-facing total.
+
+    total_value_snapshot already stores the clean value (subtotal - discount + freight)
+    with NO payment fee added — the fee is a store cost absorbed by the margin.
+    """
+    return quote.total_value_snapshot or Decimal("0")
 
 
 def _sum_net_quote_values(quotes) -> Decimal:
@@ -108,7 +108,7 @@ def home(request):
         my_converted_month = my_converted.filter(quote_date__gte=month_start, quote_date__lte=month_end)
 
         my_total_sold_month = _sum_net_quote_values(
-            my_converted_month.only("total_value_snapshot", "payment_fee_percent")
+            my_converted_month.only("total_value_snapshot")
         )
         my_quotes_count_month = my_quotes_month.count()
         my_converted_count_month = my_converted_month.count()
@@ -129,7 +129,7 @@ def home(request):
                 status=QuoteStatus.CONVERTED,
                 quote_date__gte=prev_month_start,
                 quote_date__lte=prev_month_end,
-            ).only("total_value_snapshot", "payment_fee_percent")
+            ).only("total_value_snapshot")
         )
 
         # Goal — source of truth is user.individual_target_value set in admin
@@ -190,7 +190,7 @@ def home(request):
             seller=user,
             quote_date__gte=series_start,
             quote_date__lte=today,
-        ).only("quote_date", "total_value_snapshot", "payment_fee_percent")
+        ).only("quote_date", "total_value_snapshot")
         chart_labels, chart_values, _ = _build_net_month_series_from_quotes(personal_month_quotes, month_starts)
 
         # Personal status breakdown (for hero pie)
@@ -223,7 +223,7 @@ def home(request):
                     status=QuoteStatus.CONVERTED,
                     quote_date__gte=month_start,
                     quote_date__lte=month_end,
-                ).only("seller_id", "total_value_snapshot", "payment_fee_percent")
+                ).only("seller_id", "total_value_snapshot")
                 .select_related("seller")
             )
             team_converted_month = len(_team_conv_qs)
@@ -259,7 +259,7 @@ def home(request):
                 status=QuoteStatus.CONVERTED,
                 quote_date__gte=series_start,
                 quote_date__lte=today,
-            ).only("quote_date", "total_value_snapshot", "payment_fee_percent")
+            ).only("quote_date", "total_value_snapshot")
             bi_team_chart_labels, bi_team_chart_values, bi_team_chart_counts = _build_net_month_series_from_quotes(
                 bi_team_all_quotes, month_starts,
             )
@@ -374,7 +374,7 @@ def dashboard(request):
     my_converted_month = my_converted.filter(quote_date__gte=month_start, quote_date__lte=month_end)
 
     my_total_sold_month = _sum_net_quote_values(
-        my_converted_month.only("total_value_snapshot", "payment_fee_percent")
+        my_converted_month.only("total_value_snapshot")
     )
     my_quotes_count_month = my_quotes_month.count()
     my_converted_count_month = my_converted_month.count()
@@ -396,7 +396,7 @@ def dashboard(request):
         quote_date__lte=prev_month_end,
     )
     prev_total = _sum_net_quote_values(
-        prev_converted.only("total_value_snapshot", "payment_fee_percent")
+        prev_converted.only("total_value_snapshot")
     )
 
     # ── My Goal — source of truth is user.individual_target_value set in admin ──
@@ -422,7 +422,7 @@ def dashboard(request):
                 status=QuoteStatus.CONVERTED,
                 quote_date__gte=month_start,
                 quote_date__lte=month_end,
-            ).only("seller_id", "total_value_snapshot", "payment_fee_percent")
+            ).only("seller_id", "total_value_snapshot")
             .select_related("seller")
         )
         team_converted_month = len(_team_conv_qs)
@@ -465,7 +465,7 @@ def dashboard(request):
         seller=user,
         quote_date__gte=series_start,
         quote_date__lte=today,
-    ).only("quote_date", "total_value_snapshot", "payment_fee_percent")
+    ).only("quote_date", "total_value_snapshot")
     chart_labels, chart_values, _ = _build_net_month_series_from_quotes(personal_month_quotes, month_starts)
 
     # ── Pending quotes ──
@@ -875,16 +875,31 @@ def report_commissions(request):
     MAX_DISC = 30.0
 
     def _per_quote_commission_pct(payment_type, discount, fee, installments):
-        """Mesma fórmula linear do simulador (_run_simulation).
+        """Comissão estimada por orçamento — espelha a lógica de _run_simulation.
 
-        MLD aproximado = budget (12%) − juros do banco − queima do desconto.
-        Cap: 5% para PIX/Dinheiro (amplitude 3), 4% para demais (amplitude 2).
+        PIX/CASH:          clamp(12 - desc, 2, 5)
+        Débito:            4% fixo
+        Crédito/Boleto 1x-6x: 3% fixo
+        Crédito/Boleto 7x+:   clamp(12 - taxa - desc, 2, 4)
+        Outros/Cheque:     clamp(12 - taxa - desc, 2, 4)
         """
         disc = float(discount or 0)
         fee_pct = float(fee or 0)
-        mld = max(0.0, min(12.0 - fee_pct - disc, 12.0))
-        cap = 3.0 if payment_type in ('PIX', 'CASH') else 2.0
-        return round(2.0 + (mld / 12.0) * cap, 2)
+        inst = int(installments or 1)
+        if payment_type in ('PIX', 'CASH'):
+            mld = 12.0 - disc
+            return round(max(2.0, min(mld, 5.0)), 2)
+        elif payment_type == 'DEBIT_CARD':
+            return 4.0
+        elif payment_type in ('CREDIT_CARD', 'BOLETO'):
+            if inst >= 7:
+                mld = 12.0 - fee_pct - disc
+                return round(max(2.0, min(mld, 4.0)), 2)
+            return 3.0
+        else:
+            # Cheque, sem forma, etc.
+            mld = 12.0 - fee_pct - disc
+            return round(max(2.0, min(mld, 4.0)), 2)
 
     from collections import defaultdict
     seller_totals = defaultdict(lambda: {"total_sold": 0.0, "commission": 0.0, "count": 0, "disc_sum": 0.0, "seller_name": ""})

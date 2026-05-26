@@ -500,11 +500,16 @@ from django.dispatch import receiver
 
 
 def _refresh_quote_snapshot(quote_id: int) -> None:
-    """Recalculates and persists total_value_snapshot for a quote without triggering signals."""
+    """Recalculates and persists total_value_snapshot for a quote without triggering signals.
+
+    A taxa de pagamento (cartão/boleto) é absorvida pela margem da loja e NÃO é
+    repassada ao cliente. O total do snapshot é portanto subtotal−desconto+frete,
+    sem acréscimo de taxa — idêntico ao 'Total para o Cliente' exibido no simulador.
+    """
     try:
         quote = Quote.objects.prefetch_related('items').get(pk=quote_id)
         Quote.objects.filter(pk=quote_id).update(
-            total_value_snapshot=quote.calculate_final_total()
+            total_value_snapshot=quote.calculate_total_with_freight_and_discount()
         )
     except Quote.DoesNotExist:
         pass

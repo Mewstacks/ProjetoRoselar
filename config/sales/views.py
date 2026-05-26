@@ -1006,7 +1006,7 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
 
         n = quote.payment_installments or 1
         if n > 1:
-            inst_val = subtotal / Decimal(n)
+            inst_val = avista / Decimal(n)
             c.setFillColor(GRAY)
             c.setFont("Helvetica", 8.5)
             c.drawString(MX, ty, f"OU em {n}x sem juros de {_fmt_brl(inst_val)}")

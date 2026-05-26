@@ -347,7 +347,7 @@
               <div class="hi-v">R$ {{ quote.total_value_snapshot|floatformat:2 }}</div>
               {% if quote.payment_fee_percent > 0 %}
                 <div style="font-size:.72rem;opacity:.8;margin-top:.2rem;">
-                  <i class="fa-solid fa-info-circle me-1"></i>Inclui taxa de {{ quote.payment_fee_percent }}%
+                  <i class="fa-solid fa-info-circle me-1"></i>Taxa de pagamento: {{ quote.payment_fee_percent }}% (custo da loja)
                 </div>
               {% endif %}
             </div>
