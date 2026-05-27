@@ -1087,6 +1087,21 @@ def quote_pdf_supplier(request: HttpRequest, quote_id: int) -> HttpResponse:
     cond_pagamento = request.POST.get("cond_pagamento", "").strip()
     observacoes    = request.POST.get("observacoes", "").strip()
 
+    # Preços digitados pelo financeiro — obrigatório, nunca usa item.unit_value
+    supplier_prices: dict[int, Decimal] = {}
+    for item in quote.items.all():
+        if not item.supplier_id:
+            continue
+        raw = request.POST.get(f"price_{item.id}", "").strip()
+        try:
+            supplier_prices[item.id] = Decimal(raw.replace(",", "."))
+        except Exception:
+            messages.error(
+                request,
+                f'Valor inválido para o produto "{item.product_name}". Preencha todos os preços corretamente.',
+            )
+            return render(request, "sales/quote_pdf_supplier_form.html", {"quote": quote})
+
     def _fmt_brl(value) -> str:
         s = f"{float(value):,.2f}"
         return s.replace(',', '\x00').replace('.', ',').replace('\x00', '.')
@@ -1103,7 +1118,8 @@ def quote_pdf_supplier(request: HttpRequest, quote_id: int) -> HttpResponse:
     def _make_pdf_for_supplier(supplier, items_for_supplier,
                                _transp=transportadora,
                                _cond=cond_pagamento,
-                               _obs=observacoes) -> bytes:
+                               _obs=observacoes,
+                               _prices=supplier_prices) -> bytes:
         st_title   = _ps(f'{supplier.id}_title',  fontSize=15, fontName='Helvetica-Bold',
                          textColor=NAVY, alignment=TA_CENTER, spaceAfter=2)
         st_sub     = _ps(f'{supplier.id}_sub',    fontSize=9, textColor=MUTED,
@@ -1199,7 +1215,7 @@ def quote_pdf_supplier(request: HttpRequest, quote_id: int) -> HttpResponse:
         tdata = [hdr]
         subtotal = Decimal('0.00')
         for idx, item in enumerate(items_for_supplier, 1):
-            unit = item.unit_value or Decimal('0.00')
+            unit = _prices.get(item.id, Decimal('0.00'))
             line = unit * item.quantity
             subtotal += line
             desc = item.description.strip() if item.description else '—'
@@ -1320,7 +1336,7 @@ def quote_pdf_supplier(request: HttpRequest, quote_id: int) -> HttpResponse:
     if len(by_supplier) == 1:
         supplier_id, items_list = next(iter(by_supplier.items()))
         supplier = items_list[0].supplier
-        pdf_bytes = _make_pdf_for_supplier(supplier, items_list, transportadora, cond_pagamento, observacoes)
+        pdf_bytes = _make_pdf_for_supplier(supplier, items_list, transportadora, cond_pagamento, observacoes, supplier_prices)
         safe_name = supplier.name.replace(' ', '_').replace('/', '_')
         filename = f"pedido_{quote.number}_{safe_name}.pdf"
         response = HttpResponse(pdf_bytes, content_type='application/pdf')
@@ -1331,7 +1347,7 @@ def quote_pdf_supplier(request: HttpRequest, quote_id: int) -> HttpResponse:
     with zipfile_mod.ZipFile(zip_buffer, 'w', zipfile_mod.ZIP_DEFLATED) as zf:
         for supplier_id, items_list in by_supplier.items():
             supplier = items_list[0].supplier
-            pdf_bytes = _make_pdf_for_supplier(supplier, items_list, transportadora, cond_pagamento, observacoes)
+            pdf_bytes = _make_pdf_for_supplier(supplier, items_list, transportadora, cond_pagamento, observacoes, supplier_prices)
             safe_name = supplier.name.replace(' ', '_').replace('/', '_')
             zf.writestr(f"pedido_{quote.number}_{safe_name}.pdf", pdf_bytes)
 

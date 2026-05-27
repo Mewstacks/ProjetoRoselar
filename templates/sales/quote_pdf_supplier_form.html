@@ -198,6 +198,52 @@
                 <p class="hint"><i class="fa-solid fa-circle-info me-1"></i>Será exibido em um bloco destacado no PDF. Deixe vazio para omitir.</p>
               </div>
 
+              <!-- Preços para o fornecedor (obrigatório, não usa valor da venda) -->
+              <div class="mb-4">
+                <label class="f-label">
+                  <i class="fa-solid fa-tag me-1"></i>Preços para o Fornecedor
+                </label>
+                <p class="hint mb-2"><i class="fa-solid fa-triangle-exclamation me-1" style="color:var(--red)"></i>
+                  Informe o valor unitário de custo para cada produto. Estes valores <strong>não são</strong> os preços da venda.
+                </p>
+                <div class="s-card" style="margin-bottom:0;">
+                  <table class="table table-sm mb-0" style="font-size:.85rem;">
+                    <thead style="background:#fafbfc;">
+                      <tr>
+                        <th style="padding:.5rem .8rem;color:var(--brand);font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;">Produto</th>
+                        <th style="padding:.5rem .8rem;color:var(--brand);font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;width:70px;">Qtd</th>
+                        <th style="padding:.5rem .8rem;color:var(--brand);font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;width:160px;">Vlr. Unitário <span style="color:var(--red)">*</span></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {% for item in quote.items.all %}
+                        {% if item.supplier_id %}
+                        <tr>
+                          <td style="padding:.5rem .8rem;vertical-align:middle;">
+                            <span style="font-weight:600;color:var(--brand);">{{ item.product_name }}</span>
+                            {% if item.description %}
+                              <div style="font-size:.75rem;color:var(--muted);">{{ item.description }}</div>
+                            {% endif %}
+                          </td>
+                          <td style="padding:.5rem .8rem;vertical-align:middle;text-align:center;">{{ item.quantity }}</td>
+                          <td style="padding:.5rem .8rem;vertical-align:middle;">
+                            <div class="input-group input-group-sm">
+                              <span class="input-group-text" style="font-size:.82rem;background:#f4f6f9;border-color:var(--border);">R$</span>
+                              <input type="number" name="price_{{ item.id }}"
+                                     class="f-input" style="border-radius:0 8px 8px 0;min-width:90px;"
+                                     step="0.01" min="0" placeholder="0,00"
+                                     required
+                                     title="Informe o valor unitário de custo para {{ item.product_name }}">
+                            </div>
+                          </td>
+                        </tr>
+                        {% endif %}
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
               <div class="d-flex flex-wrap gap-2 btn-row">
                 <button type="submit" class="btn-a primary">
                   <i class="fa-solid fa-download"></i>Gerar e Baixar PDF
