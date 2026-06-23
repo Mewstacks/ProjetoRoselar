@@ -366,6 +366,59 @@
           </div>
         </div>
 
+        <!-- ═══ DETALHAMENTO DE VALORES (FINANCEIRO) ═══ -->
+        {% if is_finance or is_admin %}
+        <div class="s-card fi fi-2" style="border-left:3px solid var(--orange);">
+          <div class="s-hdr">
+            <div class="s-icon orange"><i class="fa-solid fa-receipt"></i></div>
+            Detalhamento de Valores (Venda ao Cliente)
+          </div>
+          <div class="s-body">
+            <div class="r-line">
+              <span class="r-l">Valor original (produtos)</span>
+              <span style="font-weight:700;">R$ {{ value_breakdown.subtotal|floatformat:2 }}</span>
+            </div>
+            {% if value_breakdown.has_markup %}
+              <div class="r-line">
+                <span class="r-l">Acréscimo ({{ value_breakdown.markup_pct|floatformat:1 }}%)</span>
+                <span style="font-weight:700;color:var(--blue);">+ R$ {{ value_breakdown.markup_amount|floatformat:2 }}</span>
+              </div>
+            {% endif %}
+            {% if value_breakdown.has_discount %}
+              <div class="r-line">
+                <span class="r-l">Desconto ({{ value_breakdown.discount_pct|floatformat:1 }}%)</span>
+                <span style="font-weight:700;color:var(--red);">− R$ {{ value_breakdown.discount_amount|floatformat:2 }}</span>
+              </div>
+            {% endif %}
+            <div class="r-line">
+              <span class="r-l">Frete</span>
+              <span style="font-weight:700;">R$ {{ value_breakdown.freight|floatformat:2 }}</span>
+            </div>
+            <div class="r-line">
+              <span class="r-l">Subtotal com desconto + frete</span>
+              <span style="font-weight:700;">R$ {{ value_breakdown.total_with_discount|floatformat:2 }}</span>
+            </div>
+            {% if value_breakdown.payment_fee_pct > 0 %}
+              <div class="r-line">
+                <span class="r-l">Taxa de pagamento ({{ value_breakdown.payment_fee_pct|floatformat:2 }}%) — custo da loja</span>
+                <span style="font-weight:700;color:var(--muted);">R$ {{ value_breakdown.payment_fee|floatformat:2 }}</span>
+              </div>
+            {% endif %}
+            <div class="r-line" style="border-top:2px solid var(--border);margin-top:.3rem;padding-top:.6rem;">
+              <span class="r-l" style="font-weight:800;color:var(--brand);">Total final</span>
+              <span style="font-weight:800;font-size:1.05rem;color:var(--brand);">R$ {{ value_breakdown.final_total|floatformat:2 }}</span>
+            </div>
+            {% if quote.discount_authorized_by %}
+              <div style="margin-top:.6rem;font-size:.78rem;color:var(--muted);">
+                <i class="fa-solid fa-circle-check me-1" style="color:var(--orange);"></i>
+                Desconto autorizado por {{ quote.discount_authorized_by.username }}
+                {% if quote.discount_authorized_at %} em {{ quote.discount_authorized_at|date:"d/m/Y H:i" }}{% endif %}
+              </div>
+            {% endif %}
+          </div>
+        </div>
+        {% endif %}
+
         <!-- ═══ DETAILS: CUSTOMER + PAYMENT ═══ -->
         <div class="row g-3">
           <div class="col-md-6">

@@ -8,6 +8,16 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods
 from django.conf import settings
 
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
+
+from core.ratelimit import (
+    client_ip,
+    clear_attempts,
+    is_rate_limited,
+    register_failure,
+)
+
 
 def csrf_failure_view(request, reason=""):
     """
@@ -33,9 +43,16 @@ def login(request):
     if request.method == 'POST':
         username = request.POST.get('username')
         password = request.POST.get('password')
+        # Chave por IP+usuário: não pune um escritório inteiro atrás de um NAT,
+        # e só conta falhas (logins bem-sucedidos não gastam o orçamento).
+        rl_ident = f"{client_ip(request)}:{(username or '').lower()}"
+        if is_rate_limited("login", rl_ident, limit=10):
+            messages.error(request, 'Muitas tentativas. Aguarde alguns minutos e tente novamente.')
+            return render(request, 'accounts/login.html', {'login_failed': True, 'username_value': username})
         user = authenticate(request, username=username, password=password)
-        
+
         if user is not None:
+            clear_attempts("login", rl_ident)
             remember = request.POST.get('remember')
             if not remember:
                 # Session expires when the browser closes
@@ -50,12 +67,31 @@ def login(request):
                 next_url = reverse('core:index')
             return redirect(next_url)
         else:
+            register_failure("login", rl_ident, window=300)
             messages.error(request, 'Nome de usuário ou senha inválidos.')
             return render(request, 'accounts/login.html', {'login_failed': True, 'username_value': username})
-    
+
     return render(request, 'accounts/login.html')
 
+@require_http_methods(["GET", "POST"])
 def logout(request):
+    # CSRF hardening (Fetch Metadata): POST sempre OK (token CSRF).
+    # GET só é aceito em navegação same-origin de topo — bloqueia
+    # <img src="/accounts/logout/">, fetch e iframes cross-site.
+    if request.method == "GET":
+        site = request.headers.get("Sec-Fetch-Site")
+        mode = request.headers.get("Sec-Fetch-Mode")
+        if site in ("cross-site", "same-site") or (mode and mode != "navigate"):
+            return redirect('core:index')
+        # Não deslogar em prefetch/preload do navegador (Chrome, Firefox, etc.)
+        is_prefetch = (
+            "prefetch" in (request.headers.get("Sec-Purpose", "").lower())
+            or request.headers.get("Purpose", "").lower() == "prefetch"
+            or request.headers.get("X-Moz", "").lower() == "prefetch"
+            or request.headers.get("X-Purpose", "").lower() in ("preview", "prefetch")
+        )
+        if is_prefetch:
+            return redirect('core:index')
     auth_logout(request)
     messages.info(request, 'Você saiu da sua conta com sucesso.')
     return redirect('accounts:login')
@@ -64,6 +100,11 @@ def logout(request):
 @require_http_methods(["POST"])
 def change_password(request):
     """Allows a user to change their own password by confirming current password."""
+    rl_ident = client_ip(request)
+    if is_rate_limited("change_password", rl_ident, limit=10):
+        messages.error(request, 'Muitas tentativas. Aguarde alguns minutos e tente novamente.')
+        return redirect('accounts:login')
+
     username = (request.POST.get('username') or '').strip()
     old_password = request.POST.get('old_password') or ''
     new_password1 = request.POST.get('new_password1') or ''
@@ -81,30 +122,36 @@ def change_password(request):
         messages.error(request, 'A nova senha deve ser diferente da senha atual.')
         return redirect('accounts:login')
 
-    # Logged-in flow: validates against current user.
+    # Identifica o usuário e valida a senha atual (conta só falhas no rate limit).
     if request.user.is_authenticated:
         user = request.user
-        if not user.check_password(old_password):
-            messages.error(request, 'Senha atual inválida.')
+        identity_ok = user.check_password(old_password)
+    else:
+        if not username:
+            messages.error(request, 'Informe seu usuário para alterar a senha.')
             return redirect('accounts:login')
+        user = authenticate(request, username=username, password=old_password)
+        identity_ok = user is not None
 
-        user.set_password(new_password1)
-        user.save(update_fields=['password'])
-        update_session_auth_hash(request, user)
-        messages.success(request, 'Senha alterada com sucesso.')
-        return redirect('accounts:login')
-
-    # Login-screen flow: validate identity using username + old password.
-    if not username:
-        messages.error(request, 'Informe seu usuário para alterar a senha.')
-        return redirect('accounts:login')
-
-    user = authenticate(request, username=username, password=old_password)
-    if user is None:
+    if not identity_ok:
+        register_failure("change_password", rl_ident, window=300)
         messages.error(request, 'Usuário ou senha atual inválidos.')
+        return redirect('accounts:login')
+
+    # Aplica as regras de força de senha (AUTH_PASSWORD_VALIDATORS).
+    try:
+        validate_password(new_password1, user)
+    except ValidationError as e:
+        messages.error(request, ' '.join(e.messages))
         return redirect('accounts:login')
 
     user.set_password(new_password1)
     user.save(update_fields=['password'])
-    messages.success(request, 'Senha alterada com sucesso. Faça login com a nova senha.')
+    clear_attempts("change_password", rl_ident)
+
+    if request.user.is_authenticated:
+        update_session_auth_hash(request, user)
+        messages.success(request, 'Senha alterada com sucesso.')
+    else:
+        messages.success(request, 'Senha alterada com sucesso. Faça login com a nova senha.')
     return redirect('accounts:login')

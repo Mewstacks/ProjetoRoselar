@@ -13,10 +13,10 @@ from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.db import models
 from django.utils import timezone
-from PIL import Image as PILImage
+from PIL import Image as PILImage, ImageOps
 
 
-QUOTE_ITEM_IMAGE_SIZE = (600, 600)  # Fixed normalized size for PDF
+QUOTE_ITEM_IMAGE_SIZE = (900, 900)  # Fixed normalized size for PDF
 
 
 def quote_item_image_path(instance: "QuoteItemImage", filename: str) -> str:
@@ -342,20 +342,23 @@ class QuoteItemImage(models.Model):
         if self.image and not self.pk:  # only on creation
             try:
                 img = PILImage.open(self.image)
+                # Respect camera/phone orientation (EXIF) before anything else;
+                # sem isso fotos de celular saem deitadas.
+                img = ImageOps.exif_transpose(img)
                 img = img.convert("RGB")
-                # Resize keeping aspect ratio then center-crop to square
-                img.thumbnail((QUOTE_ITEM_IMAGE_SIZE[0] * 2, QUOTE_ITEM_IMAGE_SIZE[1] * 2), PILImage.LANCZOS)
-                # Center crop to exact size
-                w, h = img.size
-                target_w, target_h = QUOTE_ITEM_IMAGE_SIZE
-                left = max(0, (w - target_w) // 2)
-                top = max(0, (h - target_h) // 2)
-                right = left + target_w
-                bottom = top + target_h
-                img = img.crop((left, top, min(right, w), min(bottom, h)))
+                # Encaixa a imagem inteira no quadro mantendo proporção, SEM cortar,
+                # e centraliza sobre fundo branco (letterbox). Assim o produto nunca
+                # é cortado, independente de ser foto vertical, horizontal ou quadrada.
+                fitted = ImageOps.contain(img, QUOTE_ITEM_IMAGE_SIZE, PILImage.LANCZOS)
+                canvas = PILImage.new("RGB", QUOTE_ITEM_IMAGE_SIZE, (255, 255, 255))
+                offset = (
+                    (QUOTE_ITEM_IMAGE_SIZE[0] - fitted.width) // 2,
+                    (QUOTE_ITEM_IMAGE_SIZE[1] - fitted.height) // 2,
+                )
+                canvas.paste(fitted, offset)
                 # Save to buffer
                 buf = io.BytesIO()
-                img.save(buf, format="JPEG", quality=85)
+                canvas.save(buf, format="JPEG", quality=90, optimize=True)
                 buf.seek(0)
                 # Replace the file content
                 name = self.image.name.rsplit('.', 1)[0] + '.jpg'

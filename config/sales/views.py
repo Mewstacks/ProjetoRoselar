@@ -61,6 +61,36 @@ def _can_generate_order_pdf(user):
 def _can_view_commission(user):
     return not _is_finance(user)
 
+
+def _build_value_breakdown(quote):
+    """Detalhamento dos valores de venda ao cliente para o financeiro.
+
+    Mostra o valor original (subtotal dos produtos), acréscimo, desconto em R$,
+    frete, taxa de pagamento e o total final — tudo que o financeiro precisa
+    revisar antes de aprovar.
+    """
+    subtotal = quote.calculate_subtotal()
+    markup_pct = quote.price_increase_percent or Decimal("0.00")
+    discount_pct = quote.discount_percent or Decimal("0.00")
+    markup_amount = subtotal * markup_pct / Decimal("100")
+    discount_amount = subtotal * discount_pct / Decimal("100")
+    freight = quote.freight_value or Decimal("0.00")
+    payment_fee = quote.calculate_payment_fee_value()
+    return {
+        "subtotal": subtotal,
+        "markup_pct": markup_pct,
+        "markup_amount": markup_amount,
+        "discount_pct": discount_pct,
+        "discount_amount": discount_amount,
+        "has_discount": discount_pct > 0,
+        "has_markup": markup_pct > 0,
+        "freight": freight,
+        "total_with_discount": quote.calculate_total_with_freight_and_discount(),
+        "payment_fee": payment_fee,
+        "payment_fee_pct": quote.payment_fee_percent or Decimal("0.00"),
+        "final_total": quote.calculate_final_total(),
+    }
+
 def _get_quote_or_403(request, quote_id, **extra_filters):
     from django.http import HttpResponseForbidden
     quote = get_object_or_404(Quote, id=quote_id, **extra_filters)
@@ -203,31 +233,38 @@ def payment_method_fees_api(request: HttpRequest) -> JsonResponse:
 def authorize_discount_api(request: HttpRequest) -> JsonResponse:
     import json
     from django.contrib.auth import authenticate
-    
+    from core.ratelimit import client_ip, is_rate_limited, register_failure
+
+    rl_ident = client_ip(request)
+    # Só falhas contam: aprovar muitos descontos legítimos não bloqueia o admin.
+    if is_rate_limited("authorize_discount", rl_ident, limit=10):
+        return JsonResponse({'authorized': False, 'error': 'Muitas tentativas. Aguarde alguns minutos.'}, status=429)
+
     try:
         data = json.loads(request.body)
         username = data.get('username', '').strip()
         password = data.get('password')
         discount = data.get('discount')
-        
+
         if not password or discount is None:
             return JsonResponse({'authorized': False, 'error': 'Missing parameters'}, status=400)
-        
+
         discount_value = float(discount)
-        
+
         if discount_value <= 15:
             return JsonResponse({'authorized': False, 'error': 'Discount must be > 15%'}, status=400)
-        
+
         target_username = username if username else request.user.username
         user = authenticate(username=target_username, password=password)
-        
+
         if user and _is_admin(user):
             return JsonResponse({
                 'authorized': True,
                 'authorized_by': user.username,
                 'discount': discount_value
             })
-        
+
+        register_failure("authorize_discount", rl_ident, window=300)
         return JsonResponse({'authorized': False, 'error': 'Credenciais inválidas'}, status=403)
         
     except (json.JSONDecodeError, ValueError, TypeError):
@@ -247,8 +284,9 @@ def get_architect_commission_api(request: HttpRequest) -> JsonResponse:
         return JsonResponse({
             'commission_percent': float(commission)
         })
-    except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
+    except Exception:
+        logger.exception('get_architect_commission_api error')
+        return JsonResponse({'error': 'Erro interno.'}, status=500)
 
 @login_required
 def quote_list(request: HttpRequest) -> HttpResponse:
@@ -442,6 +480,7 @@ def quote_detail(request: HttpRequest, quote_id: int) -> HttpResponse:
     )
     return render(request, "sales/quote_detail.html", {
         "quote": quote,
+        "value_breakdown": _build_value_breakdown(quote),
         "today": timezone.localdate(),
         "is_seller": _is_seller(request.user),
         "is_finance": _is_finance(request.user),
@@ -1394,11 +1433,7 @@ def order_list(request: HttpRequest) -> HttpResponse:
     orders = Order.objects.select_related('quote', 'supplier', 'quote__customer', 'quote__seller').order_by('-created_at')
     if not _can_view_all_orders(request.user):
         orders = orders.filter(quote__seller=request.user)
-        try:
-            print(orders.aget)
-        except Exception as e:
-            print("formulario não encontrado")
-    
+
     search_query = request.GET.get('search', '').strip()
     if search_query:
         orders = orders.filter(
@@ -1447,6 +1482,8 @@ def order_detail(request: HttpRequest, order_id: int) -> HttpResponse:
         'order': order,
         'items': items,
         'total': total,
+        'show_sale_values': _can_finance_action,
+        'value_breakdown': _build_value_breakdown(order.quote) if _can_finance_action else None,
         'is_seller': _is_seller(request.user),
         'can_generate_order_pdf': _can_generate_order_pdf(request.user),
         'can_set_delivery': _can_generate_order_pdf(request.user),

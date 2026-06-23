@@ -21,6 +21,16 @@ urlpatterns = [
     path("api/search-shipping-company/", views.search_shipping_company, name="search_shipping_company"),
     path("api/create-shipping-company/", views.create_shipping_company, name="create_shipping_company"),
 
+    # Supplier (Fornecedor) APIs
+    path("api/search-supplier/", views.search_supplier, name="search_supplier"),
+    path("api/create-supplier/", views.create_supplier, name="create_supplier"),
+
+    # Supplier (Fornecedor) management
+    path("fornecedores/", views.supplier_list, name="supplier_list"),
+    path("fornecedores/novo/", views.supplier_create, name="supplier_create"),
+    path("fornecedores/<int:supplier_id>/editar/", views.supplier_edit, name="supplier_edit"),
+    path("fornecedores/<int:supplier_id>/excluir/", views.supplier_delete, name="supplier_delete"),
+
     # Global Search
     path("api/search/", views.global_search, name="global_search"),
 

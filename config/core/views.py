@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections import defaultdict
 from datetime import date as date_type, timedelta
 from decimal import Decimal
@@ -20,7 +21,7 @@ from django.views.decorators.http import require_http_methods
 from django.contrib import messages
 
 from .models import (
-    Customer, ShippingCompany,
+    Customer, ShippingCompany, Supplier,
     Notification, NotificationType,
     AuditLog, AuditAction,
     SalesGoal, GoalType, GoalPeriod,
@@ -30,6 +31,8 @@ from .models import (
 from sales.models import Quote, QuoteStatus, Order, OrderStatus, QuoteItem
 from accounts.models import User, Role
 from calendar_app.models import CalendarEvent, EventStatus
+
+logger = logging.getLogger(__name__)
 
 
 def _month_bounds(day: date_type) -> tuple[date_type, date_type]:
@@ -599,8 +602,9 @@ def create_customer(request):
         else:
             msgs = list(e.messages)
         return JsonResponse({"success": False, "error": " ".join(msgs)}, status=400)
-    except Exception as e:
-        return JsonResponse({"success": False, "error": str(e)}, status=400)
+    except Exception:
+        logger.exception("Erro inesperado em endpoint de criação")
+        return JsonResponse({"success": False, "error": "Erro interno. Tente novamente."}, status=400)
 
 
 @login_required
@@ -661,8 +665,55 @@ def create_shipping_company(request):
         else:
             msgs = list(e.messages)
         return JsonResponse({"success": False, "error": " ".join(msgs)}, status=400)
-    except Exception as e:
-        return JsonResponse({"success": False, "error": str(e)}, status=400)
+    except Exception:
+        logger.exception("Erro inesperado em endpoint de criação")
+        return JsonResponse({"success": False, "error": "Erro interno. Tente novamente."}, status=400)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Supplier (Fornecedor) Search / Create
+# ──────────────────────────────────────────────────────────────────────
+@login_required
+def search_supplier(request):
+    query = request.GET.get("query", "").strip()
+    if not query or len(query) < 2:
+        return JsonResponse({"results": []})
+    suppliers = Supplier.objects.filter(name__icontains=query)[:5]
+    results = [
+        {"id": s.id, "name": s.name, "number": s.supplier_number, "display": str(s)}
+        for s in suppliers
+    ]
+    return JsonResponse({"results": results})
+
+
+@login_required
+@require_http_methods(["POST"])
+def create_supplier(request):
+    try:
+        data = json.loads(request.body)
+        name = (data.get("name") or "").strip()
+        email = (data.get("email") or "").strip()
+        phone = (data.get("phone") or "").strip()
+        if not name:
+            return JsonResponse({"success": False, "error": "Nome é obrigatório."}, status=400)
+        supplier = Supplier(name=name, email=email, phone=phone)
+        supplier.full_clean(exclude=["supplier_number"])
+        supplier.save()
+        return JsonResponse({
+            "success": True,
+            "supplier": {"id": supplier.id, "name": str(supplier)},
+        })
+    except ValidationError as e:
+        msgs = []
+        if hasattr(e, 'message_dict'):
+            for field, errors in e.message_dict.items():
+                msgs.extend(errors)
+        else:
+            msgs = list(e.messages)
+        return JsonResponse({"success": False, "error": " ".join(msgs)}, status=400)
+    except Exception:
+        logger.exception("Erro inesperado em endpoint de criação")
+        return JsonResponse({"success": False, "error": "Erro interno. Tente novamente."}, status=400)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -692,8 +743,9 @@ def create_architect(request):
         from .models import Architect
         architect = Architect.objects.create(name=name, pix=pix)
         return JsonResponse({"success": True, "architect": {"id": architect.id, "name": architect.name, "pix": architect.pix}})
-    except Exception as e:
-        return JsonResponse({"success": False, "error": str(e)}, status=400)
+    except Exception:
+        logger.exception("Erro inesperado em endpoint de criação")
+        return JsonResponse({"success": False, "error": "Erro interno. Tente novamente."}, status=400)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -809,6 +861,19 @@ def _is_admin_user(user):
     return user.is_superuser or user.role == Role.ADMIN
 
 
+def _parse_date_param(raw, fallback):
+    """Parse YYYY-MM-DD vindo da query string; devolve fallback (date) se inválido.
+
+    Evita 500 quando o usuário manipula date_from/date_to.
+    """
+    if not raw:
+        return fallback
+    try:
+        return date_type.fromisoformat(str(raw))
+    except (ValueError, TypeError):
+        return fallback
+
+
 @login_required
 def reports_hub(request):
     if not _is_admin_user(request.user):
@@ -823,8 +888,8 @@ def report_sales(request):
         messages.error(request, "Acesso negado.")
         return redirect("core:index")
     today = timezone.localdate()
-    date_from = request.GET.get("date_from", str(today.replace(day=1)))
-    date_to = request.GET.get("date_to", str(today))
+    date_from = _parse_date_param(request.GET.get("date_from"), today.replace(day=1)).isoformat()
+    date_to = _parse_date_param(request.GET.get("date_to"), today).isoformat()
     seller_id = request.GET.get("seller", "")
 
     qs = Quote.objects.filter(
@@ -860,8 +925,8 @@ def report_commissions(request):
         messages.error(request, "Acesso negado.")
         return redirect("core:index")
     today = timezone.localdate()
-    date_from = request.GET.get("date_from", str(today.replace(day=1)))
-    date_to = request.GET.get("date_to", str(today))
+    date_from = _parse_date_param(request.GET.get("date_from"), today.replace(day=1)).isoformat()
+    date_to = _parse_date_param(request.GET.get("date_to"), today).isoformat()
 
     from core.models import SalesMarginConfig
     TOTAL_MARGIN, MIN_COMM, MAX_COMM = SalesMarginConfig.get_config()
@@ -969,8 +1034,8 @@ def report_discounts(request):
         messages.error(request, "Acesso negado.")
         return redirect("core:index")
     today = timezone.localdate()
-    date_from = request.GET.get("date_from", str(today.replace(day=1)))
-    date_to = request.GET.get("date_to", str(today))
+    date_from = _parse_date_param(request.GET.get("date_from"), today.replace(day=1)).isoformat()
+    date_to = _parse_date_param(request.GET.get("date_to"), today).isoformat()
 
     qs = Quote.objects.filter(
         quote_date__gte=date_from,
@@ -996,8 +1061,8 @@ def report_products(request):
         messages.error(request, "Acesso negado.")
         return redirect("core:index")
     today = timezone.localdate()
-    date_from = request.GET.get("date_from", str(today.replace(day=1)))
-    date_to = request.GET.get("date_to", str(today))
+    date_from = _parse_date_param(request.GET.get("date_from"), today.replace(day=1)).isoformat()
+    date_to = _parse_date_param(request.GET.get("date_to"), today).isoformat()
 
     items = (
         QuoteItem.objects.filter(
@@ -1027,8 +1092,8 @@ def report_csv_export(request):
         return redirect("core:index")
     import csv
     today = timezone.localdate()
-    date_from = request.GET.get("date_from", str(today.replace(day=1)))
-    date_to = request.GET.get("date_to", str(today))
+    date_from = _parse_date_param(request.GET.get("date_from"), today.replace(day=1)).isoformat()
+    date_to = _parse_date_param(request.GET.get("date_to"), today).isoformat()
 
     qs = Quote.objects.filter(
         status=QuoteStatus.CONVERTED,
@@ -1040,17 +1105,24 @@ def report_csv_export(request):
     response["Content-Disposition"] = f'attachment; filename="vendas_{date_from}_{date_to}.csv"'
     response.write('\ufeff')
 
+    def _csv_safe(value):
+        """Neutraliza fórmulas (CSV injection) prefixando célula perigosa com aspa simples."""
+        s = "" if value is None else str(value)
+        if s and s[0] in ("=", "+", "-", "@", "\t", "\r"):
+            return "'" + s
+        return s
+
     writer = csv.writer(response, delimiter=";")
     writer.writerow(["Número", "Data", "Cliente", "Vendedor", "Desconto %", "Total R$"])
 
     for q in qs:
         writer.writerow([
-            q.number,
+            _csv_safe(q.number),
             q.quote_date.strftime("%d/%m/%Y"),
-            q.customer.name,
-            q.seller.username,
-            f"{q.discount_percent}",
-            f"{q.total_value_snapshot}",
+            _csv_safe(q.customer.name),
+            _csv_safe(q.seller.username),
+            _csv_safe(f"{q.discount_percent}"),
+            _csv_safe(f"{q.total_value_snapshot}"),
         ])
 
     return response
@@ -1168,3 +1240,99 @@ def goal_create(request):
     )
     messages.success(request, "Meta criada.")
     return redirect("core:goals_list")
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Fornecedores — gerenciamento (listar / criar / editar / excluir)
+# ──────────────────────────────────────────────────────────────────────
+def _can_manage_suppliers(user):
+    """Admin e Financeiro podem gerenciar fornecedores."""
+    return user.is_superuser or user.role in (Role.ADMIN, Role.FINANCE)
+
+
+@login_required
+def supplier_list(request):
+    if not _can_manage_suppliers(request.user):
+        messages.error(request, "Acesso negado.")
+        return redirect("core:index")
+
+    query = request.GET.get("q", "").strip()
+    suppliers = Supplier.objects.all()
+    if query:
+        suppliers = suppliers.filter(name__icontains=query)
+    suppliers = suppliers.order_by("name")
+
+    return render(request, "core/supplier_list.html", {
+        "suppliers": suppliers,
+        "query": query,
+    })
+
+
+@login_required
+@require_http_methods(["POST"])
+def supplier_create(request):
+    if not _can_manage_suppliers(request.user):
+        messages.error(request, "Acesso negado.")
+        return redirect("core:index")
+
+    name = (request.POST.get("name") or "").strip()
+    email = (request.POST.get("email") or "").strip()
+    phone = (request.POST.get("phone") or "").strip()
+    notes = (request.POST.get("notes") or "").strip()
+
+    if not name:
+        messages.error(request, "Nome é obrigatório.")
+        return redirect("core:supplier_list")
+
+    supplier = Supplier(name=name, email=email, phone=phone, notes=notes)
+    try:
+        supplier.full_clean(exclude=["supplier_number"])
+        supplier.save()
+    except ValidationError as e:
+        messages.error(request, " ".join(e.messages) if hasattr(e, "messages") else "Dados inválidos.")
+        return redirect("core:supplier_list")
+
+    messages.success(request, f"Fornecedor {supplier.name} cadastrado.")
+    return redirect("core:supplier_list")
+
+
+@login_required
+@require_http_methods(["POST"])
+def supplier_edit(request, supplier_id):
+    if not _can_manage_suppliers(request.user):
+        messages.error(request, "Acesso negado.")
+        return redirect("core:index")
+
+    supplier = get_object_or_404(Supplier, id=supplier_id)
+    supplier.name = (request.POST.get("name") or "").strip()
+    supplier.email = (request.POST.get("email") or "").strip()
+    supplier.phone = (request.POST.get("phone") or "").strip()
+    supplier.notes = (request.POST.get("notes") or "").strip()
+
+    if not supplier.name:
+        messages.error(request, "Nome é obrigatório.")
+        return redirect("core:supplier_list")
+
+    try:
+        supplier.full_clean(exclude=["supplier_number"])
+        supplier.save()
+    except ValidationError as e:
+        messages.error(request, " ".join(e.messages) if hasattr(e, "messages") else "Dados inválidos.")
+        return redirect("core:supplier_list")
+
+    messages.success(request, f"Fornecedor {supplier.name} atualizado.")
+    return redirect("core:supplier_list")
+
+
+@login_required
+@require_http_methods(["POST"])
+def supplier_delete(request, supplier_id):
+    if not _can_manage_suppliers(request.user):
+        messages.error(request, "Acesso negado.")
+        return redirect("core:index")
+
+    supplier = get_object_or_404(Supplier, id=supplier_id)
+    name = supplier.name
+    supplier.delete()
+    messages.success(request, f"Fornecedor {name} excluído.")
+    return redirect("core:supplier_list")

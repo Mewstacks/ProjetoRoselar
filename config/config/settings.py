@@ -18,16 +18,25 @@ from django.core.exceptions import ImproperlyConfigured
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
+# SECURITY WARNING: don't run with debug turned on in production!
+DEBUG = os.environ.get('DEBUG', 'False') == 'True'
+
+# Production = deployed on Railway. Local runs (sem RAILWAY_ENVIRONMENT)
+# continuam usando o fallback de dev, evitando quebrar o fluxo local.
+_IS_PRODUCTION = bool(os.environ.get('RAILWAY_ENVIRONMENT'))
+
 # SECURITY WARNING: keep the secret key used in production secret!
 _secret = os.environ.get('SECRET_KEY')
 if not _secret:
+    if _IS_PRODUCTION:
+        raise ImproperlyConfigured(
+            "SECRET_KEY environment variable must be set in production. "
+            "Refusing to start with an insecure fallback key."
+        )
     import warnings
     _secret = 'django-insecure-dev-only-key-do-not-use-in-production'
-    warnings.warn('SECRET_KEY is not set! Using insecure dev key. Set SECRET_KEY env var for production.', stacklevel=1)
+    warnings.warn('SECRET_KEY is not set! Using insecure dev key (DEBUG only).', stacklevel=1)
 SECRET_KEY = _secret
-
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 
 ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 _railway_host = os.environ.get('RAILWAY_PUBLIC_DOMAIN')
@@ -207,6 +216,15 @@ CSRF_COOKIE_SAMESITE = 'Lax'
 # Make CSRF cookie a browser-session cookie (cleared on browser close)
 # Prevents stale persistent cookies from causing CSRF failures.
 CSRF_COOKIE_AGE = None
+
+# Hardening de cabeçalhos — só em produção (HTTPS via Railway)
+if _IS_PRODUCTION:
+    SECURE_SSL_REDIRECT = True
+    SECURE_HSTS_SECONDS = 31536000  # 1 ano
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    X_FRAME_OPTIONS = 'DENY'
 
 # Custom CSRF failure view — auto-clears stale cookie and redirects
 CSRF_FAILURE_VIEW = 'accounts.views.csrf_failure_view'

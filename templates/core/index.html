@@ -200,6 +200,14 @@
 						Minha Conta
 					</a>
 					</li>
+					{% if user.is_superuser or user.role == 'ADMIN' or user.role == 'FINANCE' %}
+					<li>
+					<a class="dropdown-item d-flex align-items-center gap-2 py-2" href="{% url 'core:supplier_list' %}">
+						<i class="fa-solid fa-truck-field"></i>
+						Fornecedores
+					</a>
+					</li>
+					{% endif %}
 					<li>
 					<a class="dropdown-item d-flex align-items-center gap-2 py-2" href="{% url 'accounts:logout' %}">
 						<i class="fa-solid fa-right-from-bracket"></i>

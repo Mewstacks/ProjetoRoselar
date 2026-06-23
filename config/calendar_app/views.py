@@ -644,10 +644,27 @@ def api_attachment_upload(request: HttpRequest, event_id: int) -> JsonResponse:
     if uploaded.size > 10 * 1024 * 1024:
         return JsonResponse({"error": "Arquivo muito grande (máx. 10 MB)."}, status=400)
 
+    # Allowlist de extensões — bloqueia HTML/SVG/JS e outros executáveis no navegador
+    ALLOWED_EXTS = {
+        ".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp",
+        ".doc", ".docx", ".xls", ".xlsx", ".txt", ".csv",
+    }
+    import os as _os
+    ext = _os.path.splitext(uploaded.name)[1].lower()
+    if ext not in ALLOWED_EXTS:
+        return JsonResponse(
+            {"error": "Tipo de arquivo não permitido. Use PDF, imagem, Word, Excel, TXT ou CSV."},
+            status=400,
+        )
+    # Nunca confiar no content-type do cliente para tipos perigosos
+    safe_ct = uploaded.content_type or "application/octet-stream"
+    if "html" in safe_ct or "svg" in safe_ct or "script" in safe_ct:
+        safe_ct = "application/octet-stream"
+
     attachment = EventAttachment.objects.create(
         event=event,
         filename=uploaded.name,
-        content_type=uploaded.content_type or "application/octet-stream",
+        content_type=safe_ct,
         file_data=uploaded.read(),
         file_size=uploaded.size,
         uploaded_by=request.user,

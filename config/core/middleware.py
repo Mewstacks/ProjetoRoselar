@@ -6,6 +6,7 @@ from django.urls import reverse
 PUBLIC_PREFIXES = [
     '/accounts/login/',
     '/accounts/logout/',
+    '/accounts/change-password/',  # troca de senha pela tela de login (identidade validada pela senha atual)
     '/admin/',
     '/static/',
     '/health/',
