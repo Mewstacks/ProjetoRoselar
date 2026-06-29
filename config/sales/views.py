@@ -919,7 +919,9 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
     items = list(quote.items.prefetch_related('images').all())
 
     def _items_page_bg():
-        c.setFillColor(LINEN)
+        # Fundo branco em toda a página de itens (header + lista de produtos),
+        # evitando o tom dourado/creme (LINEN) que tornava o texto ilegível.
+        c.setFillColor(WHITE)
         c.rect(0, 0, page_w, page_h, fill=1, stroke=0)
 
     def _draw_header():
@@ -1074,13 +1076,50 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
             c.drawRightString(MX + CW, ty, _fmt_brl(list_price))
             ty -= 18
 
-        n = quote.payment_installments or 1
-        if n > 1:
-            inst_val = avista / Decimal(n)
-            c.setFillColor(GRAY)
-            c.setFont("Helvetica", 8.5)
-            c.drawString(MX, ty, f"OU em {n}x sem juros de {_fmt_brl(inst_val)}")
+        from core.models import PaymentMethodType
+        _pay_names = dict(PaymentMethodType.choices)
+
+        def _method_label(code):
+            return _pay_names.get(code, code or "")
+
+        split_active = bool(quote.payment_type_2) and quote.payment_split_amount is not None
+
+        if split_active:
+            # Pagamento composto: Entrada (método 1) + Restante (método 2).
+            entrada_val  = min(quote.payment_split_amount, avista)
+            restante_val = max(Decimal('0'), avista - entrada_val)
+            n1 = quote.payment_installments or 1
+            n2 = quote.payment_installments_2 or 1
+            m1 = _method_label(quote.payment_type)
+            m2 = _method_label(quote.payment_type_2)
+
+            entrada_lbl = f"Entrada ({m1})" if n1 == 1 else f"Entrada ({m1}) em {n1}x"
+            c.setFillColor(NAVY)
+            c.setFont("Helvetica", 9.5)
+            c.drawString(MX, ty, entrada_lbl)
+            c.setFont("Helvetica-Bold", 11)
+            c.drawRightString(MX + CW, ty, _fmt_brl(entrada_val))
             ty -= 18
+
+            if n2 > 1:
+                parcela = restante_val / Decimal(n2)
+                restante_lbl = f"Restante ({m2}) em {n2}x de {_fmt_brl(parcela)}"
+            else:
+                restante_lbl = f"Restante ({m2}) à vista"
+            c.setFillColor(NAVY)
+            c.setFont("Helvetica", 9.5)
+            c.drawString(MX, ty, restante_lbl)
+            c.setFont("Helvetica-Bold", 11)
+            c.drawRightString(MX + CW, ty, _fmt_brl(restante_val))
+            ty -= 18
+        else:
+            n = quote.payment_installments or 1
+            if n > 1:
+                inst_val = avista / Decimal(n)
+                c.setFillColor(GRAY)
+                c.setFont("Helvetica", 8.5)
+                c.drawString(MX, ty, f"OU em {n}x sem juros de {_fmt_brl(inst_val)}")
+                ty -= 18
 
         ty -= 4
         c.setStrokeColor(GOLD)
