@@ -216,7 +216,18 @@ class Quote(models.Model):
         help_text="Quanto do total vai ao primeiro método; o restante vai ao segundo."
     )
 
-    # arredondamento do total de venda ao cliente
+    # preço final de venda ao cliente (override): quando preenchido, é o valor
+    # exato do total ao cliente. Substitui o antigo arredondamento + ajuste manual.
+    total_override = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name="Preço Final ao Cliente (R$)",
+        help_text="Valor exato do total ao cliente. Deixe em branco para usar o total calculado.",
+    )
+
+    # ── legado (mantidos por compatibilidade; não exibidos na UI) ────────────
     total_rounding_mode = models.CharField(
         max_length=5,
         choices=RoundingMode.choices,
@@ -313,11 +324,16 @@ class Quote(models.Model):
         return base_total + fee_value
 
     def apply_client_rounding(self, base: Decimal) -> Decimal:
-        """Aplica arredondamento + ajuste manual sobre um valor base.
+        """Total de venda ao cliente a partir de um valor base.
 
-        Lógica única de arredondamento do total ao cliente, reutilizável pelo
-        snapshot do pedido e pelo PDF enviado ao cliente (para não divergirem).
+        Se houver preço final digitado (total_override), ele manda: é o valor
+        exato ao cliente, ignorando o valor base. Caso contrário, mantém o
+        comportamento legado (arredondamento + ajuste manual) para orçamentos
+        antigos. Lógica única reutilizada pelo snapshot do pedido e pelo PDF do
+        cliente (para não divergirem).
         """
+        if self.total_override is not None:
+            return self.total_override
         step = ROUNDING_STEPS.get(self.total_rounding_mode)
         if step:
             base = (base / step).quantize(Decimal("1"), rounding=ROUND_HALF_UP) * step

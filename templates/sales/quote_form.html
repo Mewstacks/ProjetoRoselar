@@ -623,19 +623,11 @@
               <div class="s-body">
                 <div class="row">
                   <div class="col-md-6 mb-3">
-                    <label for="{{ form.total_rounding_mode.id_for_label }}" class="form-label fw-bold">Arredondar Total ao Cliente</label>
-                    {{ form.total_rounding_mode }}
-                    <small class="text-muted">Arredonda o total de venda para um número redondo.</small>
-                    {% if form.total_rounding_mode.errors %}
-                      <div class="text-danger small">{{ form.total_rounding_mode.errors }}</div>
-                    {% endif %}
-                  </div>
-                  <div class="col-md-6 mb-3">
-                    <label for="{{ form.total_manual_adjustment.id_for_label }}" class="form-label fw-bold">Ajuste Manual (R$)</label>
-                    {{ form.total_manual_adjustment }}
-                    <small class="text-muted">Somado após o arredondamento. Negativo desconta (ex: -50).</small>
-                    {% if form.total_manual_adjustment.errors %}
-                      <div class="text-danger small">{{ form.total_manual_adjustment.errors }}</div>
+                    <label for="{{ form.total_override.id_for_label }}" class="form-label fw-bold">Preço Final ao Cliente (R$)</label>
+                    {{ form.total_override }}
+                    <small class="text-muted">Valor exato do total ao cliente. Deixe em branco para usar o total calculado.</small>
+                    {% if form.total_override.errors %}
+                      <div class="text-danger small">{{ form.total_override.errors }}</div>
                     {% endif %}
                   </div>
                   <div class="col-md-12 mb-1">

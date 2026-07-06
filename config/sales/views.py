@@ -95,7 +95,8 @@ def _build_value_breakdown(quote):
         "rounded_total": rounded_total,
         "rounding_diff": rounded_total - total_with_discount,
         "has_rounding": (
-            quote.total_rounding_mode != RoundingMode.NONE
+            quote.total_override is not None
+            or quote.total_rounding_mode != RoundingMode.NONE
             or (quote.total_manual_adjustment or Decimal("0.00")) != Decimal("0.00")
         ),
     }
@@ -2969,6 +2970,9 @@ def quote_duplicate(request, quote_id):
             payment_installments_2=original.payment_installments_2,
             payment_fee_percent_2=original.payment_fee_percent_2,
             payment_split_amount=original.payment_split_amount,
+            total_override=original.total_override,
+            total_rounding_mode=original.total_rounding_mode,
+            total_manual_adjustment=original.total_manual_adjustment,
         )
 
         for item in original.items.all():

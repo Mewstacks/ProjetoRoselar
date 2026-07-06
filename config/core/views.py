@@ -35,6 +35,24 @@ from calendar_app.models import CalendarEvent, EventStatus
 logger = logging.getLogger(__name__)
 
 
+def _json_html(data) -> str:
+    """Serializa `data` para embutir com segurança dentro de <script>...|safe.
+
+    json.dumps NÃO escapa '<', '>', '&' nem os separadores de linha U+2028/2029,
+    então um valor como um nome de produto '</script><script>...' quebraria a tag
+    e permitiria XSS. Aqui neutralizamos essas sequências (mesma técnica do
+    filtro json_script do Django e do tojson do Flask).
+    """
+    return (
+        json.dumps(data)
+        .replace('<', '\\u003c')
+        .replace('>', '\\u003e')
+        .replace('&', '\\u0026')
+        .replace(' ', '\\u2028')
+        .replace(' ', '\\u2029')
+    )
+
+
 # The company's sales month runs from the 25th of one calendar month through
 # the 24th of the next, and is labeled by its closing month
 # (e.g. 25/Jun–24/Jul is the "Jul" sales month).
@@ -361,10 +379,10 @@ def home(request):
             "overdue_events": overdue_events,
             "unread_count": unread_count,
             "pending_orders_count": pending_orders_count,
-            "chart_labels_json": json.dumps(chart_labels),
-            "chart_values_json": json.dumps(chart_values),
-            "my_status_labels_json": json.dumps(my_status_labels),
-            "my_status_values_json": json.dumps(my_status_values),
+            "chart_labels_json": _json_html(chart_labels),
+            "chart_values_json": _json_html(chart_values),
+            "my_status_labels_json": _json_html(my_status_labels),
+            "my_status_values_json": _json_html(my_status_values),
             "team_total_sold_month": team_total_sold_month,
             "team_quotes_month": team_quotes_month,
             "team_conversion_rate": team_conversion_rate,
@@ -372,18 +390,18 @@ def home(request):
             "collective_goal": collective_goal,
             "collective_goal_pct": min(collective_goal_pct, 100),
             # BI Charts (admin only)
-            "bi_team_chart_labels_json": json.dumps(bi_team_chart_labels),
-            "bi_team_chart_values_json": json.dumps(bi_team_chart_values),
-            "bi_team_chart_counts_json": json.dumps(bi_team_chart_counts),
-            "bi_status_labels_json": json.dumps(bi_status_labels),
-            "bi_status_values_json": json.dumps(bi_status_values),
-            "bi_prod_labels_json": json.dumps(bi_prod_labels),
-            "bi_prod_values_json": json.dumps(bi_prod_values),
-            "bi_seller_labels_json": json.dumps(bi_seller_labels),
-            "bi_seller_values_json": json.dumps(bi_seller_values),
-            "bi_seller_counts_json": json.dumps(bi_seller_counts),
-            "bi_disc_labels_json": json.dumps(bi_disc_labels),
-            "bi_disc_values_json": json.dumps(bi_disc_values),
+            "bi_team_chart_labels_json": _json_html(bi_team_chart_labels),
+            "bi_team_chart_values_json": _json_html(bi_team_chart_values),
+            "bi_team_chart_counts_json": _json_html(bi_team_chart_counts),
+            "bi_status_labels_json": _json_html(bi_status_labels),
+            "bi_status_values_json": _json_html(bi_status_values),
+            "bi_prod_labels_json": _json_html(bi_prod_labels),
+            "bi_prod_values_json": _json_html(bi_prod_values),
+            "bi_seller_labels_json": _json_html(bi_seller_labels),
+            "bi_seller_values_json": _json_html(bi_seller_values),
+            "bi_seller_counts_json": _json_html(bi_seller_counts),
+            "bi_disc_labels_json": _json_html(bi_disc_labels),
+            "bi_disc_values_json": _json_html(bi_disc_values),
             "bi_top_products": bi_top_products,
         }
     return render(request, "core/index.html", context)
@@ -571,8 +589,8 @@ def dashboard(request):
         "collective_goal": collective_goal,
         "collective_goal_pct": min(collective_goal_pct, 100),
         # Chart
-        "chart_labels_json": json.dumps(chart_labels),
-        "chart_values_json": json.dumps(chart_values),
+        "chart_labels_json": _json_html(chart_labels),
+        "chart_values_json": _json_html(chart_values),
         # Lists
         "pending_quotes": pending_quotes,
         "upcoming_deliveries": upcoming_deliveries,

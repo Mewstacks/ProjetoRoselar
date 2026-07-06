@@ -31,19 +31,22 @@ class QuoteForm(forms.ModelForm):
         label="Método de Pagamento"
     )
 
-    # Aceita formato BR ("1.234,56") e negativos; vazio = 0.
-    total_manual_adjustment = forms.CharField(
+    # Preço final ao cliente (override). Aceita formato BR ("1.234,56");
+    # vazio = None (usa o total calculado).
+    total_override = forms.CharField(
         required=False,
         widget=forms.TextInput(attrs={"class": "form-control", "inputmode": "numeric", "placeholder": "0,00"}),
-        label="Ajuste Manual (R$)",
+        label="Preço Final ao Cliente (R$)",
     )
 
-    def clean_total_manual_adjustment(self):
-        from decimal import Decimal
-        raw = self.cleaned_data.get('total_manual_adjustment', '')
+    def clean_total_override(self):
+        raw = self.cleaned_data.get('total_override', '')
         if raw is None or str(raw).strip() == '':
-            return Decimal('0.00')
-        return parse_brl_decimal(raw, 'ajuste manual')
+            return None
+        val = parse_brl_decimal(raw, 'preço final ao cliente')
+        if val < 0:
+            raise forms.ValidationError('O preço final ao cliente não pode ser negativo.')
+        return val
 
     class Meta:
         model = Quote
@@ -60,8 +63,7 @@ class QuoteForm(forms.ModelForm):
             "payment_type",
             "payment_installments",
             "payment_fee_percent",
-            "total_rounding_mode",
-            "total_manual_adjustment",
+            "total_override",
             "notes",
         ]
         widgets = {
@@ -70,8 +72,6 @@ class QuoteForm(forms.ModelForm):
             "delivery_days_max": forms.NumberInput(attrs={"class": "form-control", "min": "1", "placeholder": "Ex: 20"}),
             "payment_installments": forms.Select(attrs={"class": "form-control"}),
             "payment_fee_percent": forms.HiddenInput(),
-            "total_rounding_mode": forms.Select(attrs={"class": "form-control"}),
-            "total_manual_adjustment": forms.TextInput(attrs={"class": "form-control", "inputmode": "numeric", "placeholder": "0,00"}),
             "notes": forms.Textarea(attrs={"class": "form-control", "rows": 2, "placeholder": "Observações gerais do orçamento..."}),
         }
 
@@ -84,8 +84,7 @@ class QuoteForm(forms.ModelForm):
         self.fields['architect'].required = False
         self.fields['payment_installments'].required = False
         self.fields['payment_fee_percent'].required = False
-        self.fields['total_rounding_mode'].required = False
-        self.fields['total_manual_adjustment'].required = False
+        self.fields['total_override'].required = False
         self.fields['notes'].required = False
         
         # Freight fields are conditionally required (validated in clean)

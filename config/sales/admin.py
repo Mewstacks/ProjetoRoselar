@@ -22,7 +22,7 @@ class QuoteAdmin(SellerAccess, admin.ModelAdmin):
         "freight_value", "freight_responsible", "shipping_company", "shipping_payment_method",
         "discount_percent", "discount_authorized_by", "discount_authorized_at",
         "payment_type", "payment_installments", "payment_fee_percent",
-        "total_rounding_mode", "total_manual_adjustment",
+        "total_override", "total_rounding_mode", "total_manual_adjustment",
         "has_architect", "notes",
     )
 
