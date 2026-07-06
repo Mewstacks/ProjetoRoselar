@@ -91,7 +91,7 @@ def _build_value_breakdown(quote):
         "total_with_discount": total_with_discount,
         "payment_fee": payment_fee,
         "payment_fee_pct": quote.payment_fee_percent or Decimal("0.00"),
-        "final_total": quote.calculate_final_total(),
+        "final_total": rounded_total,
         "rounded_total": rounded_total,
         "rounding_diff": rounded_total - total_with_discount,
         "has_rounding": (
@@ -1141,6 +1141,9 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
         list_price = subtotal * (Decimal('1') + markup_pct / Decimal('100'))  # com ajuste, sem desconto
         disc_val   = subtotal * disc_pct / Decimal('100')
         avista     = list_price - disc_val  # = subtotal × (1 + ajuste − desconto)
+        # Arredondamento + ajuste manual do total ao cliente (mesma lógica do
+        # snapshot do pedido) — antes o PDF ignorava e mandava valor não-arredondado.
+        avista     = quote.apply_client_rounding(avista)
 
         from core.models import PaymentMethodType
         _pay_names = dict(PaymentMethodType.choices)

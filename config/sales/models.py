@@ -312,6 +312,17 @@ class Quote(models.Model):
         fee_value = self.calculate_payment_fee_value()
         return base_total + fee_value
 
+    def apply_client_rounding(self, base: Decimal) -> Decimal:
+        """Aplica arredondamento + ajuste manual sobre um valor base.
+
+        Lógica única de arredondamento do total ao cliente, reutilizável pelo
+        snapshot do pedido e pelo PDF enviado ao cliente (para não divergirem).
+        """
+        step = ROUNDING_STEPS.get(self.total_rounding_mode)
+        if step:
+            base = (base / step).quantize(Decimal("1"), rounding=ROUND_HALF_UP) * step
+        return base + (self.total_manual_adjustment or Decimal("0.00"))
+
     def calculate_rounded_total(self) -> Decimal:
         """Total de venda ao cliente com arredondamento e ajuste manual.
 
@@ -320,10 +331,7 @@ class Quote(models.Model):
         soma o ajuste manual (pode ser negativo).
         """
         base = self.calculate_total_with_freight_and_discount()
-        step = ROUNDING_STEPS.get(self.total_rounding_mode)
-        if step:
-            base = (base / step).quantize(Decimal("1"), rounding=ROUND_HALF_UP) * step
-        return base + (self.total_manual_adjustment or Decimal("0.00"))
+        return self.apply_client_rounding(base)
 
 
 

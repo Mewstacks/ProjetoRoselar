@@ -408,21 +408,17 @@
                   {% if value_breakdown.rounding_diff < 0 %}− R$ {{ value_breakdown.rounding_diff|floatformat:2|cut:"-" }}{% else %}+ R$ {{ value_breakdown.rounding_diff|floatformat:2 }}{% endif %}
                 </span>
               </div>
-              <div class="r-line">
-                <span class="r-l" style="font-weight:700;">Total arredondado ao cliente</span>
-                <span style="font-weight:800;color:var(--brand);">R$ {{ value_breakdown.rounded_total|floatformat:2 }}</span>
-              </div>
-            {% endif %}
-            {% if value_breakdown.payment_fee_pct > 0 %}
-              <div class="r-line">
-                <span class="r-l">Taxa de pagamento ({{ value_breakdown.payment_fee_pct|floatformat:2 }}%) — custo da loja</span>
-                <span style="font-weight:700;color:var(--muted);">R$ {{ value_breakdown.payment_fee|floatformat:2 }}</span>
-              </div>
             {% endif %}
             <div class="r-line" style="border-top:2px solid var(--border);margin-top:.3rem;padding-top:.6rem;">
-              <span class="r-l" style="font-weight:800;color:var(--brand);">Total final</span>
-              <span style="font-weight:800;font-size:1.05rem;color:var(--brand);">R$ {{ value_breakdown.final_total|floatformat:2 }}</span>
+              <span class="r-l" style="font-weight:800;color:var(--brand);">Total ao cliente</span>
+              <span style="font-weight:800;font-size:1.05rem;color:var(--brand);">R$ {{ value_breakdown.rounded_total|floatformat:2 }}</span>
             </div>
+            {% if value_breakdown.payment_fee_pct > 0 %}
+              <div class="r-line" style="margin-top:.3rem;">
+                <span class="r-l" style="font-size:.8rem;color:var(--muted);">Taxa de pagamento ({{ value_breakdown.payment_fee_pct|floatformat:2 }}%) — custo da loja, não cobrado do cliente</span>
+                <span style="font-weight:700;color:var(--muted);font-size:.8rem;">− R$ {{ value_breakdown.payment_fee|floatformat:2 }}</span>
+              </div>
+            {% endif %}
             {% if quote.discount_authorized_by %}
               <div style="margin-top:.6rem;font-size:.78rem;color:var(--muted);">
                 <i class="fa-solid fa-circle-check me-1" style="color:var(--orange);"></i>
