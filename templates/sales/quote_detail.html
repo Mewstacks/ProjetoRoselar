@@ -325,8 +325,9 @@
                 <i class="fa-solid fa-file-pdf"></i>PDF Fornecedor
               </a>
               {% endif %}
-              {% if quote.status != 'CONVERTED' and quote.status != 'CANCELED' %}
-                <a href="{% url 'sales:quote_edit' quote.id %}" class="btn-a warning">
+              {% if quote.status != 'CANCELED' %}
+                <a href="{% url 'sales:quote_edit' quote.id %}" class="btn-a warning"
+                   {% if quote.status == 'CONVERTED' %}title="Editar orçamento já convertido: as alterações são propagadas aos pedidos de compra gerados."{% endif %}>
                   <i class="fa-solid fa-edit"></i>Editar
                 </a>
               {% endif %}

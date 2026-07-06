@@ -150,6 +150,131 @@ def _persist_item_images_from_formset(formset) -> None:
 
         QuoteItemImage.objects.create(item=item, image=uploaded_image)
 
+
+def _capture_order_item_links(quote) -> dict:
+    """Fotografa o vínculo OrderItem→QuoteItem ANTES de salvar a edição.
+
+    Como QuoteItem tem on_delete=SET_NULL sobre OrderItem.quote_item, ao apagar
+    um item do orçamento o vínculo é zerado e perdemos a origem. Capturamos antes
+    para conseguir remover, depois, apenas os itens de pedido derivados de itens
+    que foram removidos — preservando itens adicionados manualmente no pedido
+    (que têm quote_item nulo).
+    Retorna {order_item_id: quote_item_id} apenas para vínculos não nulos.
+    """
+    from .models import OrderItem as _OI
+    return {
+        row["id"]: row["quote_item_id"]
+        for row in _OI.objects.filter(order__quote=quote, quote_item_id__isnull=False)
+                              .values("id", "quote_item_id")
+    }
+
+
+def _sync_orders_from_quote(quote, original_links: dict) -> None:
+    """Re-sincroniza os pedidos de compra já gerados com os itens atuais do
+    orçamento (usado ao editar um orçamento já convertido).
+
+    Regras:
+    - Preserva dados do pedido (status, prazo, observações) e o custo de compra
+      já digitado em itens existentes; só define custo em itens novos.
+    - Itens adicionados manualmente ao pedido (quote_item nulo) são preservados.
+    - Remove linhas derivadas de itens do orçamento que foram apagados.
+    - Reflete alterações de fornecedor: cria pedido para fornecedor novo e
+      remove pedido por fornecedor que fica sem itens.
+    """
+    from collections import defaultdict
+
+    orders = list(quote.orders.all())
+    if not orders:
+        return
+
+    items = list(quote.items.select_related("supplier").all())
+    current_ids = {it.id for it in items}
+
+    # 1) Remove itens de pedido derivados de itens do orçamento que sumiram.
+    removed_order_item_ids = [
+        oi_id for oi_id, qi_id in original_links.items()
+        if qi_id not in current_ids
+    ]
+    if removed_order_item_ids:
+        OrderItem.objects.filter(id__in=removed_order_item_ids).delete()
+
+    by_supplier: dict[int, list] = defaultdict(list)
+    for it in items:
+        if it.supplier_id is not None:
+            by_supplier[it.supplier_id].append(it)
+
+    suppliers_with_order: set[int] = set()
+
+    for order in orders:
+        if order.is_total_conference:
+            target = items  # o pedido total contém todos os itens
+        else:
+            suppliers_with_order.add(order.supplier_id)
+            target = by_supplier.get(order.supplier_id, [])
+        target_ids = {it.id for it in target}
+
+        existing = {
+            oi.quote_item_id: oi
+            for oi in order.items.all()
+            if oi.quote_item_id is not None
+        }
+
+        # remove linhas cujo item deixou de pertencer a este pedido
+        # (ex.: item mudou de fornecedor e migrou para outro pedido).
+        stale_ids = [oi.id for qi_id, oi in existing.items() if qi_id not in target_ids]
+        if stale_ids:
+            OrderItem.objects.filter(id__in=stale_ids).delete()
+
+        for it in target:
+            oi = existing.get(it.id)
+            if oi is not None:
+                # atualiza dados do produto, preserva custo de compra manual
+                if (oi.product_name != it.product_name
+                        or oi.description != it.description
+                        or oi.quantity != it.quantity):
+                    oi.product_name = it.product_name
+                    oi.description = it.description
+                    oi.quantity = it.quantity
+                    oi.save(update_fields=["product_name", "description", "quantity"])
+            else:
+                OrderItem.objects.create(
+                    order=order,
+                    product_name=it.product_name,
+                    description=it.description,
+                    quantity=it.quantity,
+                    purchase_unit_cost=it.unit_value,
+                    quote_item=it,
+                )
+
+        # pedido por fornecedor que ficou vazio → remove
+        if not order.is_total_conference and not order.items.exists():
+            order.delete()
+
+    # 2) Fornecedores novos (sem pedido ainda) → cria pedido de compra.
+    for supplier_id, supplier_items in by_supplier.items():
+        if supplier_id in suppliers_with_order:
+            continue
+        new_order = Order.objects.create(
+            number=quote.number,
+            quote=quote,
+            supplier_id=supplier_id,
+            is_total_conference=False,
+            status=OrderStatus.PENDING,
+            delivery_deadline=None,
+        )
+        OrderItem.objects.bulk_create([
+            OrderItem(
+                order=new_order,
+                product_name=it.product_name,
+                description=it.description,
+                quantity=it.quantity,
+                purchase_unit_cost=it.unit_value,
+                quote_item=it,
+            )
+            for it in supplier_items
+        ])
+
+
 from .forms import QuoteForm, QuoteItemFormSet, OrderForm, OrderItemFormSet
 from .models import (
     Quote,
@@ -441,14 +566,18 @@ def quote_edit(request: HttpRequest, quote_id: int) -> HttpResponse:
                             messages.error(request, "Desconto acima de 15% requer autorização.")
                             return render(request, "sales/quote_form.html", {"form": form, "formset": formset, "quote": quote})
                 
+                # Captura os vínculos pedido→item ANTES de salvar (SET_NULL zera
+                # a origem ao apagar itens); usado para sincronizar os pedidos.
+                original_links = _capture_order_item_links(quote)
+
                 quote_obj.save()
                 formset.save()
                 _persist_item_images_from_formset(formset)
 
-            try:
-                pass
-            except Exception:
-                pass
+                # Orçamento já convertido: propaga as alterações para os pedidos
+                # de compra já gerados.
+                if quote.orders.exists():
+                    _sync_orders_from_quote(quote, original_links)
 
             from core.models import AuditLog, AuditAction
             AuditLog.log(request.user, AuditAction.EDIT_QUOTE,
@@ -752,14 +881,9 @@ def quote_convert_to_orders(request: HttpRequest, quote_id: int) -> HttpResponse
                             message=reminder_title,
                         )
 
-            imgs = QuoteItemImage.objects.filter(item__quote=quote)
-            for img in imgs:
-                if img.image:
-                    try:
-                        img.image.delete(save=False)
-                    except Exception:
-                        pass
-            imgs.delete()
+            # NÃO apagar as imagens dos itens ao converter: elas continuam sendo
+            # usadas no PDF do cliente e precisam sobreviver a edições posteriores
+            # do orçamento (agora editável mesmo após a conversão).
 
         from core.models import AuditLog, AuditAction, Notification, NotificationType
         AuditLog.log(request.user, AuditAction.CONVERT_ORDER,

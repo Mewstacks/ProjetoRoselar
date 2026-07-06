@@ -253,7 +253,14 @@
           <form method="post" id="quote-form" enctype="multipart/form-data">
             {% csrf_token %}
 
-
+            {% if quote and quote.status == 'CONVERTED' %}
+              <div class="alert alert-warning" style="border-radius:12px;margin-bottom:1rem;">
+                <i class="fa-solid fa-triangle-exclamation me-2"></i>
+                Este orçamento já foi <strong>convertido em pedido</strong>. As alterações
+                (itens, quantidades, fornecedores) serão <strong>propagadas automaticamente</strong>
+                para os pedidos de compra já gerados. O custo de compra já digitado nos pedidos é preservado.
+              </div>
+            {% endif %}
 
             <div class="s-card fi fi-1">
                     <div class="s-hdr">
