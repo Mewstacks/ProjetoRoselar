@@ -173,8 +173,23 @@ STORAGES = {
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Media files (uploads)
+# Na Railway o filesystem do container é EFÊMERO: tudo fora do volume é
+# apagado a cada deploy/restart. Se houver um volume anexado ao serviço,
+# a Railway define RAILWAY_VOLUME_MOUNT_PATH e os uploads vão para lá.
 MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+_volume_path = os.environ.get('RAILWAY_VOLUME_MOUNT_PATH')
+if _volume_path:
+    MEDIA_ROOT = Path(_volume_path) / 'media'
+elif _IS_PRODUCTION:
+    import warnings
+    warnings.warn(
+        'Rodando na Railway SEM volume anexado: uploads (imagens de itens, '
+        'anexos) serão PERDIDOS a cada deploy. Anexe um volume ao serviço.',
+        stacklevel=1,
+    )
+    MEDIA_ROOT = BASE_DIR / 'media'
+else:
+    MEDIA_ROOT = BASE_DIR / 'media'
 
 # Authentication settings
 LOGIN_URL = 'accounts:login'
