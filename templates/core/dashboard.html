@@ -17,7 +17,7 @@
   <link href="{% static 'assets/css/user.css' %}" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/flowbite@2.5.2/dist/flowbite.min.css" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"></script>
   <style>
     :root { --brand: #0A2640; --green: #198754; --red: #dc3545; --gray: #6c757d; }
     body { font-family: 'Manrope', sans-serif; }
@@ -172,12 +172,14 @@
   <script src="{% static 'assets/js/theme.js' %}"></script>
   <script src="https://cdn.jsdelivr.net/npm/flowbite@2.5.2/dist/flowbite.min.js"></script>
   <script>
-    var ctx = document.getElementById('salesChart').getContext('2d');
-    new Chart(ctx, {
+    var salesChartEl = document.getElementById('salesChart');
+    if (salesChartEl) try {
+    new Chart(salesChartEl.getContext('2d'), {
       type: 'line',
       data: { labels: {{ chart_labels_json|safe }}, datasets: [{ label: 'Vendas (R$)', data: {{ chart_values_json|safe }}, borderColor: '#198754', backgroundColor: 'rgba(25,135,84,0.1)', fill: true, tension: 0.3, pointRadius: 4 }] },
       options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { callback: function(v) { return 'R$ ' + v.toLocaleString('pt-BR'); } } } } }
     });
+    } catch (e) { console.error('Erro ao renderizar gráfico:', e); }
   </script>
 </body>
 </html>

@@ -166,8 +166,10 @@ def home(request):
         )
         my_quotes_count_month = my_quotes_month.count()
         my_converted_count_month = my_converted_month.count()
+        # Conversão por coorte: dos orçamentos criados no ciclo, quantos viraram venda
+        my_cohort_converted_month = my_quotes_month.filter(status__in=SOLD_STATUSES).count()
         my_conversion_rate = (
-            round(my_converted_count_month / my_quotes_count_month * 100, 1)
+            round(my_cohort_converted_month / my_quotes_count_month * 100, 1)
             if my_quotes_count_month > 0 else 0
         )
         my_avg_ticket = (
@@ -277,8 +279,14 @@ def home(request):
                 .select_related("seller")
             )
             team_converted_month = len(_team_conv_qs)
+            # Conversão por coorte: dos orçamentos criados no ciclo, quantos viraram venda
+            team_cohort_converted_month = Quote.objects.filter(
+                quote_date__gte=month_start,
+                quote_date__lte=month_end,
+                status__in=SOLD_STATUSES,
+            ).count()
             team_conversion_rate = (
-                round(team_converted_month / team_quotes_month * 100, 1)
+                round(team_cohort_converted_month / team_quotes_month * 100, 1)
                 if team_quotes_month > 0 else 0
             )
             _buckets: dict = defaultdict(lambda: {"total": Decimal("0"), "count": 0, "username": ""})
@@ -292,12 +300,25 @@ def home(request):
                  for _b in _buckets.values()],
                 key=lambda x: x["total"], reverse=True,
             )[:10]
-            _collective_goal_sum = SalesGoal.objects.filter(
-                goal_type=GoalType.INDIVIDUAL,
-                period_start__lte=today,
-                period_end__gte=today,
-                seller__role=Role.SELLER,
-            ).aggregate(total=Sum("target_value"))["total"] or Decimal("0")
+            # Meta coletiva cadastrada tem prioridade; sem ela, soma das metas individuais
+            _collective_goal_obj = (
+                SalesGoal.objects.filter(
+                    goal_type=GoalType.COLLECTIVE,
+                    period_start__lte=today,
+                    period_end__gte=today,
+                )
+                .order_by("-period_start", "-id")
+                .first()
+            )
+            if _collective_goal_obj and _collective_goal_obj.target_value > 0:
+                _collective_goal_sum = _collective_goal_obj.target_value
+            else:
+                _collective_goal_sum = SalesGoal.objects.filter(
+                    goal_type=GoalType.INDIVIDUAL,
+                    period_start__lte=today,
+                    period_end__gte=today,
+                    seller__role=Role.SELLER,
+                ).aggregate(total=Sum("target_value"))["total"] or Decimal("0")
             collective_goal = _collective_goal_sum if _collective_goal_sum > 0 else None
             if collective_goal:
                 collective_goal_pct = round(
@@ -425,8 +446,10 @@ def dashboard(request):
     )
     my_quotes_count_month = my_quotes_month.count()
     my_converted_count_month = my_converted_month.count()
+    # Conversão por coorte: dos orçamentos criados no ciclo, quantos viraram venda
+    my_cohort_converted_month = my_quotes_month.filter(status__in=SOLD_STATUSES).count()
     my_conversion_rate = (
-        round(my_converted_count_month / my_quotes_count_month * 100, 1)
+        round(my_cohort_converted_month / my_quotes_count_month * 100, 1)
         if my_quotes_count_month > 0 else 0
     )
     my_avg_ticket = (
@@ -470,8 +493,14 @@ def dashboard(request):
             .select_related("seller")
         )
         team_converted_month = len(_team_conv_qs)
+        # Conversão por coorte: dos orçamentos criados no ciclo, quantos viraram venda
+        team_cohort_converted_month = Quote.objects.filter(
+            quote_date__gte=month_start,
+            quote_date__lte=month_end,
+            status__in=SOLD_STATUSES,
+        ).count()
         team_conversion_rate = (
-            round(team_converted_month / team_quotes_month * 100, 1)
+            round(team_cohort_converted_month / team_quotes_month * 100, 1)
             if team_quotes_month > 0 else 0
         )
         _buckets: dict = defaultdict(lambda: {"total": Decimal("0"), "count": 0, "username": ""})
@@ -488,13 +517,25 @@ def dashboard(request):
             key=lambda x: x["total"], reverse=True,
         )[:10]
 
-        # Collective goal = sum of individual seller goals
-        _collective_goal_sum = SalesGoal.objects.filter(
-            goal_type=GoalType.INDIVIDUAL,
-            period_start__lte=today,
-            period_end__gte=today,
-            seller__role=Role.SELLER,
-        ).aggregate(total=Sum("target_value"))["total"] or Decimal("0")
+        # Meta coletiva cadastrada tem prioridade; sem ela, soma das metas individuais
+        _collective_goal_obj = (
+            SalesGoal.objects.filter(
+                goal_type=GoalType.COLLECTIVE,
+                period_start__lte=today,
+                period_end__gte=today,
+            )
+            .order_by("-period_start", "-id")
+            .first()
+        )
+        if _collective_goal_obj and _collective_goal_obj.target_value > 0:
+            _collective_goal_sum = _collective_goal_obj.target_value
+        else:
+            _collective_goal_sum = SalesGoal.objects.filter(
+                goal_type=GoalType.INDIVIDUAL,
+                period_start__lte=today,
+                period_end__gte=today,
+                seller__role=Role.SELLER,
+            ).aggregate(total=Sum("target_value"))["total"] or Decimal("0")
         collective_goal = _collective_goal_sum if _collective_goal_sum > 0 else None
         if collective_goal:
             collective_goal_pct = round(
@@ -1264,14 +1305,20 @@ def goal_create(request):
         messages.success(request, "Meta individual mensal salva.")
         return redirect("core:goals_list")
 
-    SalesGoal.objects.create(
+    period = request.POST.get("period", GoalPeriod.MONTHLY)
+    if period == GoalPeriod.MONTHLY:
+        # Metas mensais seguem o ciclo de vendas 25→24
+        requested_start, requested_end = _month_bounds(requested_start)
+    SalesGoal.objects.update_or_create(
         goal_type=GoalType.COLLECTIVE,
         seller=None,
-        period=request.POST.get("period", GoalPeriod.MONTHLY),
+        period=period,
         period_start=requested_start,
         period_end=requested_end,
-        target_value=target_value,
-        target_quantity=target_quantity,
+        defaults={
+            "target_value": target_value,
+            "target_quantity": target_quantity,
+        },
     )
     messages.success(request, "Meta criada.")
     return redirect("core:goals_list")

@@ -598,14 +598,23 @@
     <script src="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.js"></script>
     <script src="{% static 'assets/js/theme.js' %}"></script>
     {% if user.is_authenticated %}
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"></script>
     <script>
+      // Isola cada gráfico: um erro (ou CDN indisponível) não derruba os demais
+      function safeChart(ctx, config) {
+        try {
+          return new Chart(ctx, config);
+        } catch (e) {
+          console.error('Erro ao renderizar gráfico:', e);
+        }
+      }
+
       // ── Hero Doughnut: Goal Progress ──
       var goalEl = document.getElementById('heroGoalPie');
       if (goalEl) {
         var goalPct = {{ goal_pct_raw }};
         var remaining = Math.max(100 - goalPct, 0);
-        new Chart(goalEl.getContext('2d'), {
+        safeChart(goalEl.getContext('2d'), {
           type: 'doughnut',
           data: {
             labels: ['Atingido', 'Restante'],
@@ -620,7 +629,7 @@
       if (convEl) {
         var convRate = {{ my_conversion_rate }};
         var convRem = Math.max(100 - convRate, 0);
-        new Chart(convEl.getContext('2d'), {
+        safeChart(convEl.getContext('2d'), {
           type: 'doughnut',
           data: {
             labels: ['Convertidos', 'Não convertidos'],
@@ -636,7 +645,7 @@
         var statusLabels = {{ my_status_labels_json|safe }};
         var statusValues = {{ my_status_values_json|safe }};
         var statusColors = ['#4ade80', '#60a5fa', '#fbbf24', '#f87171', '#a78bfa', '#94a3b8'];
-        new Chart(statusEl.getContext('2d'), {
+        safeChart(statusEl.getContext('2d'), {
           type: 'pie',
           data: {
             labels: statusLabels,
@@ -656,7 +665,7 @@
       // BI: Team Evolution (line + bar combo)
       var biTeamEl = document.getElementById('biTeamEvolution');
       if (biTeamEl) {
-        new Chart(biTeamEl.getContext('2d'), {
+        safeChart(biTeamEl.getContext('2d'), {
           type: 'bar',
           data: {
             labels: {{ bi_team_chart_labels_json|safe }},
@@ -700,7 +709,7 @@
       // BI: Status Pie
       var biPieEl = document.getElementById('biStatusPie');
       if (biPieEl) {
-        new Chart(biPieEl.getContext('2d'), {
+        safeChart(biPieEl.getContext('2d'), {
           type: 'doughnut',
           data: {
             labels: {{ bi_status_labels_json|safe }},
@@ -724,7 +733,7 @@
       // BI: Seller Bar
       var biSellerEl = document.getElementById('biSellerBar');
       if (biSellerEl) {
-        new Chart(biSellerEl.getContext('2d'), {
+        safeChart(biSellerEl.getContext('2d'), {
           type: 'bar',
           data: {
             labels: {{ bi_seller_labels_json|safe }},
@@ -754,7 +763,7 @@
       // BI: Discount per Seller
       var biDiscEl = document.getElementById('biDiscountBar');
       if (biDiscEl) {
-        new Chart(biDiscEl.getContext('2d'), {
+        safeChart(biDiscEl.getContext('2d'), {
           type: 'bar',
           data: {
             labels: {{ bi_disc_labels_json|safe }},
