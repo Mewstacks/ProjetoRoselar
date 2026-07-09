@@ -189,6 +189,7 @@ class OrderForm(forms.ModelForm):
         fields = [
             "supplier",
             "status",
+            "created_at",
             "purchase_condition_text",
             "transport_info",
             "delivery_deadline",
@@ -197,15 +198,20 @@ class OrderForm(forms.ModelForm):
         widgets = {
             "supplier": forms.Select(attrs={"class": "form-control"}),
             "status": forms.Select(attrs={"class": "form-control"}),
+            "created_at": forms.DateTimeInput(attrs={"class": "form-control", "type": "datetime-local"}, format="%Y-%m-%dT%H:%M"),
             "purchase_condition_text": forms.TextInput(attrs={"class": "form-control", "placeholder": "Ex: 30/60/90 dias"}),
             "transport_info": forms.TextInput(attrs={"class": "form-control", "placeholder": "Ex: Transportadora X, retira na fábrica..."}),
             "delivery_deadline": forms.DateInput(attrs={"class": "form-control", "type": "date"}, format="%Y-%m-%d"),
             "notes": forms.Textarea(attrs={"class": "form-control", "rows": 2, "placeholder": "Observações do pedido..."}),
         }
+        labels = {
+            "created_at": "Data do Pedido",
+        }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["delivery_deadline"].input_formats = ["%Y-%m-%d"]
+        self.fields["created_at"].input_formats = ["%Y-%m-%dT%H:%M"]
         for name in ("supplier", "purchase_condition_text", "transport_info", "delivery_deadline", "notes"):
             self.fields[name].required = False
         # Pedido total não tem fornecedor: trava o campo.

@@ -159,6 +159,11 @@
                   {% if form.transport_info.errors %}<div class="text-danger small">{{ form.transport_info.errors }}</div>{% endif %}
                 </div>
                 <div class="col-md-6 mb-3">
+                  <label for="{{ form.created_at.id_for_label }}" class="form-label">Data do Pedido</label>
+                  {{ form.created_at }}
+                  {% if form.created_at.errors %}<div class="text-danger small">{{ form.created_at.errors }}</div>{% endif %}
+                </div>
+                <div class="col-md-6 mb-3">
                   <label for="{{ form.delivery_deadline.id_for_label }}" class="form-label">Prazo de Entrega</label>
                   {{ form.delivery_deadline }}
                   {% if form.delivery_deadline.errors %}<div class="text-danger small">{{ form.delivery_deadline.errors }}</div>{% endif %}

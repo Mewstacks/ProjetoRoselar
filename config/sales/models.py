@@ -481,7 +481,8 @@ class Order(models.Model):
         help_text="Data real de entrega acordada com o cliente"
     )
 
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Criado em")
+    # editável: usuário pode ajustar a data do pedido manualmente
+    created_at = models.DateTimeField(default=timezone.now, verbose_name="Criado em")
 
     class Meta:
         verbose_name = "Pedido de Compra"
