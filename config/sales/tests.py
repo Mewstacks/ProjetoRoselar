@@ -125,6 +125,53 @@ class OrderDateSyncTests(TestCase):
             status=OrderStatus.PENDING,
         )
 
+    def test_editing_quote_dates_via_quote_edit(self):
+        """Editar Data do Orçamento e Data da Venda direto na tela do orçamento."""
+        self.client.login(username="admin", password="x")
+        resp = self.client.post(
+            reverse("sales:quote_edit", args=[self.quote.id]),
+            {
+                "customer": self.customer.id,
+                "quote_date": "2026-06-10",
+                "sale_date": "2026-06-24",
+                "freight_responsible": "CUSTOMER",
+                "payment_type": "",
+                "total_override": "",
+                "notes": "",
+                "items-TOTAL_FORMS": "0",
+                "items-INITIAL_FORMS": "0",
+                "items-MIN_NUM_FORMS": "0",
+                "items-MAX_NUM_FORMS": "1000",
+            },
+        )
+        self.assertEqual(resp.status_code, 302, getattr(resp, "context", None) and resp.context["form"].errors)
+        self.quote.refresh_from_db()
+        self.assertEqual(self.quote.quote_date, date(2026, 6, 10))
+        self.assertEqual(self.quote.sale_date, date(2026, 6, 24))
+
+    def test_blank_sale_date_keeps_existing_value(self):
+        """Submit sem sale_date não apaga a data da venda de orçamento vendido."""
+        self.client.login(username="admin", password="x")
+        resp = self.client.post(
+            reverse("sales:quote_edit", args=[self.quote.id]),
+            {
+                "customer": self.customer.id,
+                "quote_date": "",
+                "sale_date": "",
+                "freight_responsible": "CUSTOMER",
+                "payment_type": "",
+                "total_override": "",
+                "notes": "",
+                "items-TOTAL_FORMS": "0",
+                "items-INITIAL_FORMS": "0",
+                "items-MIN_NUM_FORMS": "0",
+                "items-MAX_NUM_FORMS": "1000",
+            },
+        )
+        self.assertEqual(resp.status_code, 302, getattr(resp, "context", None) and resp.context["form"].errors)
+        self.quote.refresh_from_db()
+        self.assertEqual(self.quote.sale_date, date(2026, 7, 5))
+
     def test_editing_order_date_updates_sale_date(self):
         self.client.login(username="admin", password="x")
         resp = self.client.post(

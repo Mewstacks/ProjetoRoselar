@@ -629,6 +629,25 @@
               </div>
               <div class="s-body">
                 <div class="row">
+                  <div class="col-md-3 mb-3">
+                    <label for="{{ form.quote_date.id_for_label }}" class="form-label fw-bold">Data do Orçamento</label>
+                    {{ form.quote_date }}
+                    {% if form.quote_date.errors %}
+                      <div class="text-danger small">{{ form.quote_date.errors }}</div>
+                    {% endif %}
+                  </div>
+                  {% if form.instance.sale_date %}
+                  <div class="col-md-3 mb-3">
+                    <label for="{{ form.sale_date.id_for_label }}" class="form-label fw-bold">Data da Venda</label>
+                    {{ form.sale_date }}
+                    <small class="text-muted">Define o mês da venda nos painéis e comissões.</small>
+                    {% if form.sale_date.errors %}
+                      <div class="text-danger small">{{ form.sale_date.errors }}</div>
+                    {% endif %}
+                  </div>
+                  {% endif %}
+                </div>
+                <div class="row">
                   <div class="col-md-6 mb-3">
                     <label for="{{ form.total_override.id_for_label }}" class="form-label fw-bold">Preço Final ao Cliente (R$)</label>
                     {{ form.total_override }}

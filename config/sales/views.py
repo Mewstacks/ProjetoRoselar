@@ -468,7 +468,8 @@ def quote_create(request: HttpRequest) -> HttpResponse:
                 quote: Quote = form.save(commit=False)
                 quote.seller = request.user
                 quote.status = QuoteStatus.DRAFT
-                quote.quote_date = timezone.localdate()
+                if not quote.quote_date:
+                    quote.quote_date = timezone.localdate()
                 quote.number = generate_next_quote_number()
                 
                 if quote.discount_percent is None:

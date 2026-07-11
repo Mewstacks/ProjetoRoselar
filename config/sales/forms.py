@@ -1,7 +1,8 @@
 from django import forms
 from django.forms import inlineformset_factory
+from django.utils import timezone
 
-from .models import Quote, QuoteItem, QuoteItemImage, Order, OrderItem
+from .models import Quote, QuoteItem, QuoteItemImage, Order, OrderItem, SOLD_STATUSES
 from core.models import PaymentMethodType
 
 
@@ -52,6 +53,8 @@ class QuoteForm(forms.ModelForm):
         model = Quote
         fields = [
             "customer",
+            "quote_date",
+            "sale_date",
             "delivery_days_min",
             "delivery_days_max",
             "freight_value",
@@ -67,6 +70,8 @@ class QuoteForm(forms.ModelForm):
             "notes",
         ]
         widgets = {
+            "quote_date": forms.DateInput(attrs={"class": "form-control", "type": "date"}, format="%Y-%m-%d"),
+            "sale_date": forms.DateInput(attrs={"class": "form-control", "type": "date"}, format="%Y-%m-%d"),
             "freight_value": forms.TextInput(attrs={"class": "form-control", "inputmode": "numeric", "placeholder": "0,00"}),
             "delivery_days_min": forms.NumberInput(attrs={"class": "form-control", "min": "1", "placeholder": "Ex: 15"}),
             "delivery_days_max": forms.NumberInput(attrs={"class": "form-control", "min": "1", "placeholder": "Ex: 20"}),
@@ -86,6 +91,12 @@ class QuoteForm(forms.ModelForm):
         self.fields['payment_fee_percent'].required = False
         self.fields['total_override'].required = False
         self.fields['notes'].required = False
+
+        # Datas editáveis: quote_date sempre; sale_date só existe após a venda.
+        self.fields['quote_date'].required = False
+        self.fields['quote_date'].input_formats = ["%Y-%m-%d"]
+        self.fields['sale_date'].required = False
+        self.fields['sale_date'].input_formats = ["%Y-%m-%d"]
         
         # Freight fields are conditionally required (validated in clean)
         self.fields['freight_value'].required = False
@@ -115,6 +126,13 @@ class QuoteForm(forms.ModelForm):
 
         if cleaned.get('has_architect') and not cleaned.get('architect'):
             self.add_error('architect', 'Selecione o arquiteto.')
+
+        # Datas em branco não apagam o valor existente (evita venda "sumir"
+        # dos painéis por submit sem a data preenchida).
+        if not cleaned.get('quote_date'):
+            cleaned['quote_date'] = self.instance.quote_date or timezone.localdate()
+        if not cleaned.get('sale_date') and self.instance.pk and self.instance.status in SOLD_STATUSES:
+            cleaned['sale_date'] = self.instance.sale_date
 
         return cleaned
 
