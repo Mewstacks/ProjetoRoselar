@@ -245,3 +245,74 @@ class SimulationTariffTests(TestCase):
             for o in json.loads(ctx["tariffs_by_type_json"])["CREDIT_CARD"]
         ]
         self.assertEqual(oferecidas, [1, 6, 12])
+
+
+class SimulationSuggestionTests(TestCase):
+    """Sugestoes de acrescimo: o motor precisa dizer QUANTO falta, nao so 'ta ruim'.
+
+    A 'reforma testuaria' (6b8c4a2) fixou esses campos em 0/False e o template,
+    que ja tinha a UI pronta, passou a cair sempre na mensagem generica.
+    """
+
+    def setUp(self):
+        from core.models import PaymentTariff
+
+        PaymentTariff.objects.all().delete()
+        for inst, fee in ((1, "4.00"), (6, "3.00"), (7, "9.87"), (12, "13.30")):
+            PaymentTariff.objects.create(
+                payment_type="CREDIT_CARD", installments=inst, fee_percent=Decimal(fee)
+            )
+
+    def _sim(self, installments, price_increase=Decimal("0")):
+        from sales.views import _build_simulation_context
+
+        return _build_simulation_context(
+            subtotal=Decimal("10000"),
+            freight_value=Decimal("0"),
+            sim_payment_type="CREDIT_CARD",
+            sim_has_architect=False,
+            sim_discount=Decimal("0"),
+            price_increase_pct=price_increase,
+            sim_installments=installments,
+        )
+
+    def test_margem_folgada_nao_sugere_desbloqueio(self):
+        ctx = self._sim(6)
+        self.assertFalse(ctx["controls_blocked"])
+        self.assertEqual(ctx["min_increase_to_unblock"], Decimal("0"))
+
+    def test_bloqueado_diz_quanto_falta(self):
+        ctx = self._sim(12)
+        self.assertTrue(ctx["controls_blocked"])
+        self.assertGreater(ctx["min_increase_to_unblock"], Decimal("0"))
+
+    def test_sugestao_realmente_desbloqueia(self):
+        ctx = self._sim(12)
+        sugerido = ctx["min_increase_to_unblock"]
+        depois = self._sim(12, price_increase=sugerido)
+        self.assertFalse(depois["controls_blocked"])
+        self.assertGreaterEqual(depois["margin_balance"], 0)
+
+    def test_sugestao_e_o_minimo(self):
+        # Um passo (0,1%) abaixo do sugerido ainda tem que travar, senao o
+        # simulador esta pedindo mais dinheiro do que o necessario ao cliente.
+        ctx = self._sim(12)
+        quase = ctx["min_increase_to_unblock"] - Decimal("0.1")
+        self.assertTrue(self._sim(12, price_increase=quase)["controls_blocked"])
+
+    def test_oportunidade_quando_comissao_abaixo_do_teto(self):
+        ctx = self._sim(7)
+        self.assertFalse(ctx["controls_blocked"])
+        self.assertTrue(ctx["suggestion_is_opportunity"])
+        self.assertGreater(ctx["suggested_increase"], Decimal("0"))
+        depois = self._sim(7, price_increase=ctx["suggested_increase"])
+        self.assertGreaterEqual(
+            depois["seller_commission_percent"], ctx["commission_max"]
+        )
+
+    def test_tarifa_ausente_nao_sugere_nada(self):
+        # Sem tarifa nao da para saber o custo; sugerir um numero seria inventar.
+        ctx = self._sim(9)
+        self.assertTrue(ctx["controls_blocked"])
+        self.assertEqual(ctx["min_increase_to_unblock"], Decimal("0"))
+        self.assertEqual(ctx["suggested_increase"], Decimal("0"))

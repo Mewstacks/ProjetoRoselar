@@ -2710,6 +2710,7 @@ def _build_simulation_context(
     from core.models import PaymentTariff, PaymentMethodType
 
     MAX_DISCOUNT_ABSOLUTE = Decimal("30")
+    MAX_PRICE_INCREASE    = Decimal("30")
     MARGIN_BASE      = Decimal("12")
     COMMISSION_FLOOR = Decimal("2")
     ARQUITETO_PCT    = Decimal("5")  # 5% sobre valor ajustado líquido da margem de 12%
@@ -2718,8 +2719,8 @@ def _build_simulation_context(
     subtotal      = max(Decimal("0"), Decimal(str(subtotal or 0)))
     freight_value = max(Decimal("0"), Decimal(str(freight_value or 0)))
     sim_discount         = max(Decimal("0"), min(Decimal(str(sim_discount or 0)), MAX_DISCOUNT_ABSOLUTE))
-    price_increase_pct   = max(Decimal("0"), min(Decimal(str(price_increase_pct or 0)), Decimal("30")))
-    price_increase_pct_2 = max(Decimal("0"), min(Decimal(str(price_increase_pct_2 or 0)), Decimal("30")))
+    price_increase_pct   = max(Decimal("0"), min(Decimal(str(price_increase_pct or 0)), MAX_PRICE_INCREASE))
+    price_increase_pct_2 = max(Decimal("0"), min(Decimal(str(price_increase_pct_2 or 0)), MAX_PRICE_INCREASE))
     sim_installments   = max(1, min(int(sim_installments or 1), 18))
     sim_installments_2 = max(1, min(int(sim_installments_2 or 1), 18))
 
@@ -2755,31 +2756,41 @@ def _build_simulation_context(
         freight_cobrado = freight_value
 
     # ---- Total temporário baseado no frete JÁ com markup ----
-    adj_subtotal_tmp   = subtotal * (Decimal("1") + price_increase_pct / Decimal("100") - sim_discount / Decimal("100"))
-    valor_temporario_total = max(Decimal("0"), adj_subtotal_tmp + freight_cobrado)
+    def _total_for_markup(pi: Decimal) -> Decimal:
+        adj = subtotal * (Decimal("1") + pi / Decimal("100") - sim_discount / Decimal("100"))
+        return max(Decimal("0"), adj + freight_cobrado)
 
     # ---- Construção da lista de métodos de pagamento para o Motor ----
-    payment_methods: list[dict] = []
-    valor_leg_1 = valor_temporario_total
-    valor_leg_2 = Decimal("0")
+    def _methods_for_total(total: Decimal) -> list[dict]:
+        if split_mode and sim_split_amount and sim_payment_type:
+            leg_1 = min(Decimal(str(sim_split_amount)), total)
+            leg_2 = max(Decimal("0"), total - leg_1)
+            methods = [{
+                'type': sim_payment_type, 'installments': sim_installments,
+                'fee_pct': fee_1, 'value': leg_1,
+            }]
+            if leg_2 > 0:
+                methods.append({
+                    'type': sim_payment_type_2, 'installments': sim_installments_2,
+                    'fee_pct': fee_2, 'value': leg_2,
+                })
+            return methods
+        if sim_payment_type:
+            return [{
+                'type': sim_payment_type, 'installments': sim_installments,
+                'fee_pct': fee_1, 'value': total,
+            }]
+        return []
+
+    valor_temporario_total = _total_for_markup(price_increase_pct)
+    payment_methods = _methods_for_total(valor_temporario_total)
 
     if split_mode and sim_split_amount and sim_payment_type:
         valor_leg_1 = min(Decimal(str(sim_split_amount)), valor_temporario_total)
         valor_leg_2 = max(Decimal("0"), valor_temporario_total - valor_leg_1)
-        payment_methods.append({
-            'type': sim_payment_type, 'installments': sim_installments,
-            'fee_pct': fee_1, 'value': valor_leg_1,
-        })
-        if valor_leg_2 > 0:
-            payment_methods.append({
-                'type': sim_payment_type_2, 'installments': sim_installments_2,
-                'fee_pct': fee_2, 'value': valor_leg_2,
-            })
-    elif sim_payment_type:
-        payment_methods.append({
-            'type': sim_payment_type, 'installments': sim_installments,
-            'fee_pct': fee_1, 'value': valor_temporario_total,
-        })
+    else:
+        valor_leg_1 = valor_temporario_total
+        valor_leg_2 = Decimal("0")
 
     # ---- Higienização da entrada (down payment) HONESTA ----
     dp_input = max(Decimal("0"), Decimal(str(down_payment_value or 0)))
@@ -2934,6 +2945,92 @@ def _build_simulation_context(
     else:
         commission_max_actual = Decimal('4')
 
+    # ---- Sugestões de acréscimo ----
+    # Restaura o que a "reforma testuaria" (6b8c4a2) tinha fixado em zero: o
+    # template já mostra "Adicione no mínimo +X%", mas o motor devolvia sempre 0
+    # e todas as mensagens caíam no texto genérico.
+    #
+    # `_run_simulation` é puro, então em vez de derivar uma fórmula fechada por
+    # modo (split, entrada, arquiteto) varremos o acréscimo em passos de 0,1% e
+    # perguntamos ao próprio motor. Vale para todos os modos, sem duplicar regra.
+    _PI_STEP = Decimal("0.1")
+
+    def _mld_pct_para(pi: Decimal, solo: dict | None = None) -> Decimal:
+        """MLD% com acréscimo `pi`. `solo` avalia um método cobrindo a venda toda."""
+        if subtotal <= 0:
+            return Decimal("0")
+        total = _total_for_markup(pi)
+        if solo is None:
+            methods = _methods_for_total(total)
+        else:
+            methods = [dict(solo, value=total)] if total > 0 else []
+        r = _run_simulation(
+            subtotal=subtotal,
+            freight_value=freight_cobrado,
+            discount_pct=sim_discount,
+            markup_pct=pi,
+            down_payment=Decimal("0") if split_mode else min(dp_input, total),
+            has_architect=sim_has_architect,
+            payment_methods=methods,
+        )
+        return (r['costs']['margin_balance'] / subtotal) * Decimal("100")
+
+    def _acrescimo_para(alvo_mld: Decimal, solo: dict | None = None) -> Decimal:
+        """Menor acréscimo ADICIONAL que leva o MLD ao alvo. 0 se nem +30% resolve."""
+        if subtotal <= 0:
+            return Decimal("0")
+        pi = price_increase_pct
+        while pi <= MAX_PRICE_INCREASE:
+            if _mld_pct_para(pi, solo) >= alvo_mld:
+                return pi - price_increase_pct
+            pi += _PI_STEP
+        return Decimal("0")
+
+    min_increase_to_unblock = Decimal("0")
+    suggested_increase = Decimal("0")
+    suggestion_is_opportunity = False
+
+    _pode_sugerir = bool(payment_methods) and not tariff_missing and subtotal > 0
+    if _pode_sugerir:
+        if resultado['controls_blocked']:
+            # VERMELHO: quanto falta para a margem parar de ser negativa.
+            min_increase_to_unblock = _acrescimo_para(Decimal("0"))
+            suggested_increase = min_increase_to_unblock
+        elif sacrifice_active:
+            # AMARELO: comissão presa no piso; sugere o acréscimo que devolve o verde.
+            suggested_increase = _acrescimo_para(Decimal("2"))
+        elif (
+            not split_mode
+            and sim_payment_type in {'CREDIT_CARD', 'BOLETO'}
+            and sim_installments >= 7
+            and seller_commission_percent < commission_max_actual
+        ):
+            # VERDE com comissão abaixo do teto: oportunidade, não problema.
+            suggested_increase = _acrescimo_para(commission_max_actual)
+            suggestion_is_opportunity = suggested_increase > 0
+
+    # Cada perna do split avaliada isoladamente: "esse método, sozinho, se paga?"
+    margin_exceeded_1 = False
+    margin_exceeded_2 = False
+    suggested_increase_1 = Decimal("0")
+    suggested_increase_2 = Decimal("0")
+    if split_mode and _pode_sugerir:
+        _solo_1 = {'type': sim_payment_type, 'installments': sim_installments, 'fee_pct': fee_1}
+        margin_exceeded_1 = _mld_pct_para(price_increase_pct, _solo_1) < Decimal("0")
+        if margin_exceeded_1:
+            suggested_increase_1 = _acrescimo_para(Decimal("0"), _solo_1)
+        if valor_leg_2 > 0:
+            _solo_2 = {'type': sim_payment_type_2, 'installments': sim_installments_2, 'fee_pct': fee_2}
+            margin_exceeded_2 = _mld_pct_para(price_increase_pct, _solo_2) < Decimal("0")
+            if margin_exceeded_2:
+                suggested_increase_2 = _acrescimo_para(Decimal("0"), _solo_2)
+
+    any_method_over_margin = (
+        split_mode
+        and not resultado['controls_blocked']
+        and (margin_exceeded_1 or margin_exceeded_2)
+    )
+
     blended_fee_pct = (
         (payment_fee_value / financed_value * Decimal("100"))
         if financed_value > 0 else Decimal("0")
@@ -3001,18 +3098,20 @@ def _build_simulation_context(
         'controls_blocked':        controls_blocked,
         'margin_limit_exceeded':   controls_blocked,
         'margin_exceeded':         controls_blocked,
-        'margin_exceeded_1':       False,
-        'margin_exceeded_2':       False,
-        'any_method_over_margin':  False,
+        'margin_exceeded_1':       margin_exceeded_1,
+        'margin_exceeded_2':       margin_exceeded_2,
+        'any_method_over_margin':  any_method_over_margin,
         'margin_balance':          resultado['costs']['margin_balance'],
         'margin_base':             MARGIN_BASE,
 
-        # Sugestões / target (desativado no novo motor)
-        'suggested_increase':       Decimal("0"),
-        'suggested_increase_1':     Decimal("0"),
-        'suggested_increase_2':     Decimal("0"),
-        'suggestion_is_opportunity': False,
-        'min_increase_to_unblock':  Decimal("0"),
+        # Sugestões
+        'suggested_increase':       suggested_increase.quantize(_PI_STEP, rounding=ROUND_CEILING),
+        'suggested_increase_1':     suggested_increase_1.quantize(_PI_STEP, rounding=ROUND_CEILING),
+        'suggested_increase_2':     suggested_increase_2.quantize(_PI_STEP, rounding=ROUND_CEILING),
+        'suggestion_is_opportunity': suggestion_is_opportunity,
+        'min_increase_to_unblock':  min_increase_to_unblock.quantize(_PI_STEP, rounding=ROUND_CEILING),
+
+        # Target (segue desativado no novo motor)
         'target_mode':              False,
         'target_final_input':       Decimal("0"),
         'target_installment_mode':  False,
