@@ -62,6 +62,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    'django.middleware.cache.UpdateCacheMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -71,6 +72,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'core.middleware.LoginRequiredMiddleware',
+    'django.middleware.cache.FetchFromCacheMiddleware',
 ]
 
 ROOT_URLCONF = 'config.urls'
@@ -118,6 +120,24 @@ else:
         }
     }
 
+
+# Cache
+# LocMemCache is per-process and requires no external services. Each Gunicorn
+# worker has its own cache, so this trades perfect consistency for zero
+# infrastructure overhead. Upgrade to Redis (django-redis) if you need a
+# shared cache across workers.
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "roselar-cache",
+    }
+}
+
+# Per-site cache middleware TTL (seconds). Views decorated with @cache_page
+# override this value. Set to 0 to disable the site-wide cache middleware
+# while keeping @cache_page decorators active.
+CACHE_MIDDLEWARE_SECONDS = 0
+CACHE_MIDDLEWARE_KEY_PREFIX = "roselar"
 
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
