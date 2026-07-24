@@ -316,3 +316,174 @@ class SimulationSuggestionTests(TestCase):
         self.assertTrue(ctx["controls_blocked"])
         self.assertEqual(ctx["min_increase_to_unblock"], Decimal("0"))
         self.assertEqual(ctx["suggested_increase"], Decimal("0"))
+
+
+class OrderEditFormsetTests(TestCase):
+    """Regressão: a linha extra vazia do formset não pode travar a edição.
+
+    O campo `quantity` herda o default 1 como initial; sem a guarda em
+    OrderItemForm.has_changed, uma linha nova/órfã cujo quantity chega vazio era
+    validada como preenchida e quebrava a edição com "campos obrigatórios".
+    """
+
+    def setUp(self):
+        from core.models import Customer
+
+        self.admin = User.objects.create_user(username="admin", password="x", role="ADMIN")
+        self.customer = Customer.objects.create(name="Cliente Teste")
+        self.seller = User.objects.create_user(username="v", password="x", role="SELLER")
+        self.quote = Quote.objects.create(
+            number="ORC-7000", customer=self.customer, seller=self.seller,
+            status=QuoteStatus.CONVERTED, sale_date=date(2026, 7, 5),
+        )
+        self.order = Order.objects.create(
+            number="ORC-7000", quote=self.quote, is_total_conference=True,
+            status=OrderStatus.PENDING,
+        )
+        self.item = self.order.items.create(
+            product_name="Cadeira", quantity=3, purchase_unit_cost=Decimal("50.00"),
+        )
+
+    def _base(self, total_forms):
+        return {
+            "supplier": "",
+            "status": OrderStatus.PENDING,
+            "created_at": "2026-07-05T10:00",
+            "purchase_condition_text": "",
+            "transport_info": "",
+            "delivery_deadline": "",
+            "notes": "",
+            "items-TOTAL_FORMS": str(total_forms),
+            "items-INITIAL_FORMS": "1",
+            "items-MIN_NUM_FORMS": "0",
+            "items-MAX_NUM_FORMS": "1000",
+            "items-0-id": str(self.item.id),
+            "items-0-product_name": "Cadeira",
+            "items-0-description": "",
+            "items-0-quantity": "3",
+            "items-0-purchase_unit_cost": "50,00",
+        }
+
+    def test_edit_with_empty_extra_row_quantity_blank(self):
+        self.client.login(username="admin", password="x")
+        data = self._base(2)
+        data.update({
+            "items-1-id": "", "items-1-product_name": "",
+            "items-1-description": "", "items-1-quantity": "",
+            "items-1-purchase_unit_cost": "",
+        })
+        resp = self.client.post(reverse("sales:order_edit", args=[self.order.id]), data)
+        self.assertEqual(resp.status_code, 302, getattr(resp, "context", None) and resp.context["formset"].errors)
+        self.assertEqual(self.order.items.count(), 1)
+
+    def test_edit_with_orphan_row_after_add_then_delete(self):
+        # Usuário adicionou uma linha (TOTAL_FORMS=3) e depois removeu do DOM:
+        # o índice 2 não envia dados. Não pode travar a edição.
+        self.client.login(username="admin", password="x")
+        data = self._base(3)
+        data.update({
+            "items-1-id": "", "items-1-product_name": "",
+            "items-1-quantity": "1", "items-1-purchase_unit_cost": "",
+        })
+        resp = self.client.post(reverse("sales:order_edit", args=[self.order.id]), data)
+        self.assertEqual(resp.status_code, 302, getattr(resp, "context", None) and resp.context["formset"].errors)
+
+    def test_edit_adds_a_real_new_item(self):
+        self.client.login(username="admin", password="x")
+        data = self._base(2)
+        data.update({
+            "items-1-id": "", "items-1-product_name": "Mesa",
+            "items-1-description": "", "items-1-quantity": "1",
+            "items-1-purchase_unit_cost": "120,00",
+        })
+        resp = self.client.post(reverse("sales:order_edit", args=[self.order.id]), data)
+        self.assertEqual(resp.status_code, 302, getattr(resp, "context", None) and resp.context["formset"].errors)
+        self.assertEqual(self.order.items.count(), 2)
+
+
+class QuoteSaleDateEndpointTests(TestCase):
+    """Editar a data da venda direto no orçamento (Parte 2)."""
+
+    def setUp(self):
+        from core.models import Customer
+
+        self.admin = User.objects.create_user(username="admin", password="x", role="ADMIN")
+        self.seller = User.objects.create_user(username="v", password="x", role="SELLER")
+        self.customer = Customer.objects.create(name="Cliente")
+        self.quote = Quote.objects.create(
+            number="ORC-7100", customer=self.customer, seller=self.seller,
+            status=QuoteStatus.CONVERTED, sale_date=date(2026, 7, 5),
+        )
+
+    def test_set_sale_date(self):
+        self.client.login(username="admin", password="x")
+        resp = self.client.post(
+            reverse("sales:quote_set_sale_date", args=[self.quote.id]),
+            {"sale_date": "2026-06-20"},
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.quote.refresh_from_db()
+        self.assertEqual(self.quote.sale_date, date(2026, 6, 20))
+
+    def test_reject_when_not_sold(self):
+        self.quote.status = QuoteStatus.DRAFT
+        self.quote.save(update_fields=["status"])
+        self.client.login(username="admin", password="x")
+        resp = self.client.post(
+            reverse("sales:quote_set_sale_date", args=[self.quote.id]),
+            {"sale_date": "2026-06-20"},
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.quote.refresh_from_db()
+        self.assertEqual(self.quote.sale_date, date(2026, 7, 5))  # inalterado
+
+
+class DualPricingTests(TestCase):
+    """Orçamento atacado + varejo: dois preços por item (Parte 3)."""
+
+    def setUp(self):
+        from core.models import Customer
+
+        self.admin = User.objects.create_user(username="admin", password="x", role="ADMIN")
+        self.seller = User.objects.create_user(username="v", password="x", role="SELLER")
+        self.customer = Customer.objects.create(name="Cliente")
+        self.quote = Quote.objects.create(
+            number="ORC-7200", customer=self.customer, seller=self.seller,
+            status=QuoteStatus.DRAFT, dual_pricing=True,
+            freight_responsible="CUSTOMER",
+        )
+        self.quote.items.create(
+            product_name="Sofá", quantity=2,
+            unit_value=Decimal("1000.00"), unit_value_wholesale=Decimal("800.00"),
+        )
+        self.quote.items.create(
+            product_name="Puff", quantity=1,
+            unit_value=Decimal("300.00"),  # sem atacado: cai no varejo
+        )
+
+    def test_wholesale_subtotal_uses_wholesale_price_with_retail_fallback(self):
+        # varejo: 2*1000 + 1*300 = 2300
+        self.assertEqual(self.quote.calculate_subtotal(), Decimal("2300.00"))
+        # atacado: 2*800 + 1*300(fallback) = 1900
+        self.assertEqual(self.quote.calculate_subtotal_wholesale(), Decimal("1900.00"))
+
+    def test_wholesale_total_lower_than_retail(self):
+        retail = self.quote.calculate_rounded_total()
+        wholesale = self.quote.calculate_rounded_total_wholesale()
+        self.assertEqual(retail, Decimal("2300.00"))
+        self.assertEqual(wholesale, Decimal("1900.00"))
+        self.assertLess(wholesale, retail)
+
+    def test_wholesale_total_ignores_total_override(self):
+        # total_override fixa só o varejo; o atacado segue calculado.
+        self.quote.total_override = Decimal("2500.00")
+        self.quote.save(update_fields=["total_override"])
+        self.assertEqual(self.quote.calculate_rounded_total(), Decimal("2500.00"))
+        self.assertEqual(self.quote.calculate_rounded_total_wholesale(), Decimal("1900.00"))
+
+    def test_client_pdf_renders_with_dual_pricing(self):
+        self.client.login(username="admin", password="x")
+        resp = self.client.get(reverse("sales:quote_pdf_client", args=[self.quote.id]))
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp["Content-Type"], "application/pdf")
+        self.assertGreater(len(resp.content), 1000)

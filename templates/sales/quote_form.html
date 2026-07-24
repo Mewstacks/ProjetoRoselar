@@ -535,6 +535,13 @@
                 Itens do Orçamento
               </div>
               <div class="s-body">
+                      <div class="form-check form-switch mb-3" style="padding-left:2.6rem;">
+                        {{ form.dual_pricing }}
+                        <label class="form-check-label fw-bold" for="{{ form.dual_pricing.id_for_label }}">
+                          Orçamento Atacado + Varejo
+                        </label>
+                        <div class="text-muted small">Ao ligar, cada item ganha um campo de preço de atacado; o PDF do cliente mostra os dois valores.</div>
+                      </div>
                       {{ formset.management_form }}
                       
                       <div id="formset-container">
@@ -586,10 +593,17 @@
                                 {% endif %}
                               </div>
                               <div class="col-md-3 mb-3">
-                                <label class="form-label fw-bold">Valor Unitário (R$)</label>
+                                <label class="form-label fw-bold">Valor Unitário (R$){% if form.instance.dual_pricing or form.dual_pricing.value %} <span class="text-muted">— Varejo</span>{% endif %}</label>
                                 {{ item_form.unit_value }}
                                 {% if item_form.unit_value.errors %}
                                   <div class="text-danger small">{{ item_form.unit_value.errors }}</div>
+                                {% endif %}
+                              </div>
+                              <div class="col-md-3 mb-3 wholesale-field-container" {% if not form.dual_pricing.value %}style="display:none;"{% endif %}>
+                                <label class="form-label fw-bold">Valor Atacado (R$)</label>
+                                {{ item_form.unit_value_wholesale }}
+                                {% if item_form.unit_value_wholesale.errors %}
+                                  <div class="text-danger small">{{ item_form.unit_value_wholesale.errors }}</div>
                                 {% endif %}
                               </div>
                               <div class="col-md-3 mb-3 architect-field-container">
@@ -1445,8 +1459,10 @@
           });
         });
 
-        // Apply currency mask to new unit_value inputs
-        newRow.querySelectorAll('input[name$="-unit_value"]').forEach(applyCurrencyMask);
+        // Apply currency mask to new unit_value inputs (varejo e atacado)
+        newRow.querySelectorAll('input[name$="-unit_value"], input[name$="-unit_value_wholesale"]').forEach(applyCurrencyMask);
+        // Respeita o estado atual do toggle atacado nas linhas novas
+        syncWholesaleColumns();
       }
 
       // ── Currency mask for Valor Unitário ──────────────────────────────
@@ -1477,8 +1493,8 @@
         });
       }
 
-      // Apply mask to all existing unit_value inputs on page load
-      document.querySelectorAll('input[name$="-unit_value"]').forEach(input => {
+      // Apply mask to all existing unit_value inputs on page load (varejo e atacado)
+      document.querySelectorAll('input[name$="-unit_value"], input[name$="-unit_value_wholesale"]').forEach(input => {
         // Format existing decimal values (e.g. 1234.56) to display format (1.234,56)
         if (input.value && input.value.includes('.')) {
           const parts = input.value.split('.');
@@ -1489,6 +1505,20 @@
         }
         applyCurrencyMask(input);
       });
+
+      // ── Toggle das colunas de preço de atacado (Orçamento Atacado + Varejo) ──
+      function syncWholesaleColumns() {
+        const cb = document.getElementById('{{ form.dual_pricing.id_for_label }}');
+        const on = cb ? cb.checked : false;
+        document.querySelectorAll('.wholesale-field-container').forEach(el => {
+          el.style.display = on ? '' : 'none';
+        });
+      }
+      (function initWholesaleToggle() {
+        const cb = document.getElementById('{{ form.dual_pricing.id_for_label }}');
+        if (cb) cb.addEventListener('change', syncWholesaleColumns);
+        syncWholesaleColumns();
+      })();
 
       // Apply mask to freight_value input
       const freightInput = document.querySelector('input[name="freight_value"]');

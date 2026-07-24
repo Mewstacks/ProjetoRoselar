@@ -67,6 +67,7 @@ class QuoteForm(forms.ModelForm):
             "payment_installments",
             "payment_fee_percent",
             "total_override",
+            "dual_pricing",
             "notes",
         ]
         widgets = {
@@ -77,6 +78,7 @@ class QuoteForm(forms.ModelForm):
             "delivery_days_max": forms.NumberInput(attrs={"class": "form-control", "min": "1", "placeholder": "Ex: 20"}),
             "payment_installments": forms.Select(attrs={"class": "form-control"}),
             "payment_fee_percent": forms.HiddenInput(),
+            "dual_pricing": forms.CheckboxInput(attrs={"class": "form-check-input"}),
             "notes": forms.Textarea(attrs={"class": "form-control", "rows": 2, "placeholder": "Observações gerais do orçamento..."}),
         }
 
@@ -90,6 +92,7 @@ class QuoteForm(forms.ModelForm):
         self.fields['payment_installments'].required = False
         self.fields['payment_fee_percent'].required = False
         self.fields['total_override'].required = False
+        self.fields['dual_pricing'].required = False
         self.fields['notes'].required = False
 
         # Datas editáveis: quote_date sempre; sale_date só existe após a venda.
@@ -151,6 +154,13 @@ class QuoteItemForm(forms.ModelForm):
         widget=forms.TextInput(attrs={'class': 'form-control', 'inputmode': 'numeric'}),
         label="Valor Unitário"
     )
+
+    # Preço de atacado (opcional, só usado quando o orçamento é atacado+varejo)
+    unit_value_wholesale = forms.CharField(
+        required=False,
+        widget=forms.TextInput(attrs={'class': 'form-control', 'inputmode': 'numeric', 'placeholder': '0,00'}),
+        label="Valor Atacado"
+    )
     
     # Image upload for the item (shown in buyer's PDF)
     item_image = forms.ImageField(
@@ -175,7 +185,42 @@ class QuoteItemForm(forms.ModelForm):
         if val <= 0:
             raise forms.ValidationError('O valor unitário deve ser maior que zero.')
         return val
-    
+
+    def clean_unit_value_wholesale(self):
+        raw = self.cleaned_data.get('unit_value_wholesale', '')
+        if raw is None or str(raw).strip() == '':
+            return None  # atacado opcional: em branco cai no varejo (line_total_wholesale)
+        raw = str(raw).strip()
+        if ',' in raw:
+            raw = raw.replace('.', '').replace(',', '.')
+        from decimal import Decimal, InvalidOperation
+        try:
+            val = Decimal(raw)
+        except InvalidOperation:
+            raise forms.ValidationError('Valor de atacado inválido.')
+        if val <= 0:
+            raise forms.ValidationError('O valor de atacado deve ser maior que zero.')
+        return val
+
+    def has_changed(self):
+        """Linha nova (sem pk) sem produto e sem valor = vazia: não valida.
+
+        Mesma guarda do OrderItemForm: `quantity` herda o default 1 como
+        `initial`, então uma linha extra/nova cujo `quantity` chega vazio pareceria
+        "alterada" e quebraria o save do orçamento com "campos obrigatórios" numa
+        linha em branco.
+        """
+        if not self.instance.pk:
+            name = (self.data.get(self.add_prefix("product_name")) or "").strip()
+            value = (self.data.get(self.add_prefix("unit_value")) or "").strip()
+            wholesale = (self.data.get(self.add_prefix("unit_value_wholesale")) or "").strip()
+            # Qualquer valor digitado (varejo OU atacado OU nome) torna a linha
+            # não-vazia: ela então valida e o usuário é avisado do que falta, em
+            # vez de a linha ser descartada em silêncio.
+            if not name and not value and not wholesale:
+                return False
+        return super().has_changed()
+
     class Meta:
         model = QuoteItem
         fields = [
@@ -184,6 +229,7 @@ class QuoteItemForm(forms.ModelForm):
             "description",
             "quantity",
             "unit_value",
+            "unit_value_wholesale",
             "architect_percent",
         ]
         widgets = {
@@ -260,6 +306,27 @@ class OrderItemForm(forms.ModelForm):
         if val < 0:
             raise forms.ValidationError("O custo de compra não pode ser negativo.")
         return val
+
+    def has_changed(self):
+        """Linha nova (sem pk) sem produto e sem custo = vazia: não valida.
+
+        O campo `quantity` herda o default 1 do modelo como `initial`. Sem esta
+        guarda, uma linha extra/nova não preenchida — cujo `quantity` chega vazio
+        (linha adicionada e limpa via JS, ou órfã de um add-then-delete que deixa
+        o índice no TOTAL_FORMS) — seria considerada "alterada" e passaria pela
+        validação `required`, quebrando a edição inteira do pedido com
+        "campos obrigatórios" em uma linha que o usuário nem preencheu.
+        """
+        if not self.instance.pk:
+            name = (self.data.get(self.add_prefix("product_name")) or "").strip()
+            cost = (self.data.get(self.add_prefix("purchase_unit_cost")) or "").strip()
+            desc = (self.data.get(self.add_prefix("description")) or "").strip()
+            # `quantity` é ignorado de propósito: ele herda o default 1 e chega
+            # sempre preenchido, então não distingue linha vazia de linha real.
+            # Qualquer nome/custo/descrição digitado torna a linha validável.
+            if not name and not cost and not desc:
+                return False
+        return super().has_changed()
 
     class Meta:
         model = OrderItem

@@ -273,6 +273,15 @@ class Quote(models.Model):
         help_text="Valor somado (ou subtraído, se negativo) ao total após o arredondamento.",
     )
 
+    # Orçamento atacado + varejo: quando ligado, cada item carrega também um
+    # preço de atacado (QuoteItem.unit_value_wholesale) e o PDF/detalhe mostram
+    # os dois totais (varejo e atacado) lado a lado.
+    dual_pricing = models.BooleanField(
+        default=False,
+        verbose_name="Orçamento Atacado + Varejo",
+        help_text="Mostra preços de varejo e atacado lado a lado.",
+    )
+
     # observações gerais do orçamento
     notes = models.TextField(blank=True, verbose_name="Observações")
 
@@ -319,24 +328,49 @@ class Quote(models.Model):
         return desc1
     
     def calculate_subtotal(self) -> Decimal:
-        """Calcula subtotal dos itens sem desconto e sem frete."""
+        """Calcula subtotal dos itens (varejo) sem desconto e sem frete."""
         subtotal = sum(item.line_total for item in self.items.all())
         return Decimal(str(subtotal))
-    
-    def calculate_total_with_freight_and_discount(self) -> Decimal:
+
+    def calculate_subtotal_wholesale(self) -> Decimal:
+        """Subtotal dos itens no preço de atacado (sem desconto e sem frete)."""
+        subtotal = sum(item.line_total_wholesale for item in self.items.all())
+        return Decimal(str(subtotal))
+
+    @property
+    def billable_freight(self) -> Decimal:
+        """Frete efetivamente repassado ao cliente.
+
+        Quando o frete é 'Frete Próprio - Empresa' (STORE), a loja arca com o
+        custo e ele NÃO entra no total de venda ao cliente — caso contrário o
+        transporte inflaria o total e, com ele, a comissão do vendedor.
+        """
+        if self.freight_responsible == FreightResponsible.STORE:
+            return Decimal("0.00")
+        return self.freight_value or Decimal("0.00")
+
+    def calculate_total_with_freight_and_discount(self, subtotal: Decimal = None) -> Decimal:
         """Calcula total com frete, ajuste de preço e desconto, mas SEM taxa de pagamento.
 
         O ajuste de preço (markup) e o desconto incidem apenas sobre os produtos
         (subtotal), não sobre o frete, alinhado com o motor de simulação
         (_run_simulation): adj = subtotal × (1 + ajuste% − desconto%).
+
+        O frete só entra no total quando é repassado ao cliente (billable_freight);
+        frete por conta da loja (STORE) fica de fora.
+
+        `subtotal` opcional permite reaproveitar a mesma regra para o total de
+        atacado (passando calculate_subtotal_wholesale()); por padrão usa o
+        subtotal de varejo.
         """
-        subtotal = self.calculate_subtotal()
+        if subtotal is None:
+            subtotal = self.calculate_subtotal()
         markup_pct = self.price_increase_percent or Decimal("0.0")
         discount_pct = self.discount_percent or Decimal("0.0")
         adj_subtotal = subtotal * (
             Decimal("1") + markup_pct / Decimal("100") - discount_pct / Decimal("100")
         )
-        return adj_subtotal + (self.freight_value or Decimal("0.00"))
+        return adj_subtotal + self.billable_freight
     
     def calculate_payment_fee_value(self) -> Decimal:
         """Calcula o valor da taxa de pagamento (suporta pagamento dividido)."""
@@ -356,7 +390,7 @@ class Quote(models.Model):
         fee_value = self.calculate_payment_fee_value()
         return base_total + fee_value
 
-    def apply_client_rounding(self, base: Decimal) -> Decimal:
+    def apply_client_rounding(self, base: Decimal, use_override: bool = True) -> Decimal:
         """Total de venda ao cliente a partir de um valor base.
 
         Se houver preço final digitado (total_override), ele manda: é o valor
@@ -364,8 +398,11 @@ class Quote(models.Model):
         comportamento legado (arredondamento + ajuste manual) para orçamentos
         antigos. Lógica única reutilizada pelo snapshot do pedido e pelo PDF do
         cliente (para não divergirem).
+
+        `use_override=False` ignora o total_override — usado pelo total de
+        atacado, já que o preço final digitado se refere só ao total de varejo.
         """
-        if self.total_override is not None:
+        if use_override and self.total_override is not None:
             return self.total_override
         step = ROUNDING_STEPS.get(self.total_rounding_mode)
         if step:
@@ -381,6 +418,18 @@ class Quote(models.Model):
         """
         base = self.calculate_total_with_freight_and_discount()
         return self.apply_client_rounding(base)
+
+    def calculate_rounded_total_wholesale(self) -> Decimal:
+        """Total de venda ao cliente no preço de atacado.
+
+        Reusa a mesma regra de varejo (markup, desconto, frete e
+        arredondamento/ajuste legado), trocando só a base pelo subtotal de
+        atacado. Ignora total_override, que se refere ao total de varejo.
+        """
+        base = self.calculate_total_with_freight_and_discount(
+            self.calculate_subtotal_wholesale()
+        )
+        return self.apply_client_rounding(base, use_override=False)
 
 
 
@@ -401,6 +450,12 @@ class QuoteItem(models.Model):
 
     quantity = models.PositiveIntegerField(default=1, verbose_name="Qtd")
     unit_value = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"), verbose_name="Valor Unit.")
+    # Preço de atacado por item (opcional). Só usado quando Quote.dual_pricing
+    # está ligado; unit_value continua sendo o preço de varejo.
+    unit_value_wholesale = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True,
+        verbose_name="Valor Unit. Atacado",
+    )
 
     # condição do item (se precisar)
     condition_text = models.CharField(max_length=200, blank=True, verbose_name="Condição")
@@ -431,6 +486,18 @@ class QuoteItem(models.Model):
     @property
     def line_total(self) -> Decimal:
         return (self.unit_value or Decimal("0.00")) * Decimal(self.quantity or 0)
+
+    @property
+    def line_total_wholesale(self) -> Decimal:
+        """Total da linha no preço de atacado.
+
+        Cai de volta no preço de varejo (unit_value) quando o atacado do item
+        não foi preenchido, para o total de atacado nunca ficar subestimado.
+        """
+        unit = self.unit_value_wholesale
+        if unit is None:
+            unit = self.unit_value or Decimal("0.00")
+        return unit * Decimal(self.quantity or 0)
 
 
 class QuoteItemImage(models.Model):

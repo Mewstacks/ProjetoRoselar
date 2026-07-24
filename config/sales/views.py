@@ -75,11 +75,13 @@ def _build_value_breakdown(quote):
     markup_amount = subtotal * markup_pct / Decimal("100")
     discount_amount = subtotal * discount_pct / Decimal("100")
     freight = quote.freight_value or Decimal("0.00")
+    from .models import FreightResponsible
+    freight_to_store = quote.freight_responsible == FreightResponsible.STORE
     payment_fee = quote.calculate_payment_fee_value()
     total_with_discount = quote.calculate_total_with_freight_and_discount()
     rounded_total = quote.calculate_rounded_total()
     from .models import RoundingMode
-    return {
+    breakdown = {
         "subtotal": subtotal,
         "markup_pct": markup_pct,
         "markup_amount": markup_amount,
@@ -88,6 +90,7 @@ def _build_value_breakdown(quote):
         "has_discount": discount_pct > 0,
         "has_markup": markup_pct > 0,
         "freight": freight,
+        "freight_to_store": freight_to_store,
         "total_with_discount": total_with_discount,
         "payment_fee": payment_fee,
         "payment_fee_pct": quote.payment_fee_percent or Decimal("0.00"),
@@ -99,7 +102,13 @@ def _build_value_breakdown(quote):
             or quote.total_rounding_mode != RoundingMode.NONE
             or (quote.total_manual_adjustment or Decimal("0.00")) != Decimal("0.00")
         ),
+        "dual_pricing": quote.dual_pricing,
     }
+    if quote.dual_pricing:
+        # Rótulos explícitos: o total padrão é o de varejo.
+        breakdown["subtotal_wholesale"] = quote.calculate_subtotal_wholesale()
+        breakdown["rounded_total_wholesale"] = quote.calculate_rounded_total_wholesale()
+    return breakdown
 
 def _get_quote_or_403(request, quote_id, **extra_filters):
     from django.http import HttpResponseForbidden
@@ -665,6 +674,59 @@ def quote_detail(request: HttpRequest, quote_id: int) -> HttpResponse:
             and total_order.status == OrderStatus.ONGOING
         ),
     })
+
+@login_required
+@require_http_methods(["POST"])
+def quote_set_sale_date(request: HttpRequest, quote_id: int) -> HttpResponse:
+    """Edita a data da venda (data de conversão) diretamente no orçamento.
+
+    A data da venda define o mês em que a venda entra nos painéis e comissões.
+    Só faz sentido em orçamentos já vendidos (SOLD_STATUSES). Observação: editar
+    depois a "Data do Pedido" no pedido re-deriva Quote.sale_date a partir do
+    pedido mais antigo (order_edit), então a edição direta aqui é autoritativa
+    até a próxima edição de data de um pedido do mesmo orçamento.
+    """
+    quote, forbidden = _get_quote_or_403(request, quote_id)
+    if forbidden:
+        messages.error(request, "Acesso negado.")
+        return redirect("sales:quote_list")
+
+    if quote.status not in SOLD_STATUSES:
+        messages.error(request, "Só é possível editar a data da venda de um orçamento convertido.")
+        return redirect("sales:quote_detail", quote_id=quote.id)
+
+    raw = request.POST.get("sale_date", "").strip()
+    try:
+        new_date = date_type.fromisoformat(raw) if raw else None
+    except ValueError:
+        new_date = None
+
+    if not new_date:
+        messages.error(request, "Data da venda inválida.")
+        return redirect("sales:quote_detail", quote_id=quote.id)
+
+    old_date = quote.sale_date
+    if new_date != old_date:
+        quote.sale_date = new_date
+        quote.save(update_fields=["sale_date"])
+
+        from core.models import AuditLog, AuditAction
+        AuditLog.log(
+            request.user,
+            AuditAction.EDIT_VALUES,
+            f"Data da venda do orçamento {quote.number} alterada de "
+            f"{old_date.strftime('%d/%m/%Y') if old_date else '—'} para "
+            f"{new_date.strftime('%d/%m/%Y')}.",
+            obj=quote,
+            ip_address=request.META.get('REMOTE_ADDR'),
+        )
+        messages.success(
+            request,
+            f"Data da venda atualizada para {new_date.strftime('%d/%m/%Y')}.",
+        )
+
+    return redirect("sales:quote_detail", quote_id=quote.id)
+
 
 @login_required
 @require_http_methods(["GET", "POST"])
@@ -1276,19 +1338,30 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
         # embutido, sem desconto. Assim a soma dos itens + frete reconcilia com o
         # "Valor sem desconto"; o desconto entra depois, no bloco de total.
         markup_pct = quote.price_increase_percent or Decimal('0')
-        unit_price = item.unit_value * (Decimal('1') + markup_pct / Decimal('100'))
-        if item.quantity == 1:
-            price_label = "valor total"
-            price_amt   = unit_price * item.quantity
-        else:
-            price_label = "valor unitário"
-            price_amt   = unit_price
+        markup_mult = Decimal('1') + markup_pct / Decimal('100')
+        unit_price = item.unit_value * markup_mult
+        qty_label = "valor total" if item.quantity == 1 else "valor unitário"
 
-        c.setFillColor(GRAY)
-        _draw_spaced(price_label, txt_x, price_y + 13, FONT_REG, 7.5, cs=1.5)
-        c.setFillColor(NAVY)
-        c.setFont(FONT_BOLD, 13)
-        c.drawString(txt_x, price_y - 1, _fmt_brl(price_amt))
+        def _price_block(x, label, base_unit):
+            amt = base_unit * item.quantity if item.quantity == 1 else base_unit
+            c.setFillColor(GRAY)
+            _draw_spaced(label, x, price_y + 13, FONT_REG, 7.5, cs=1.5)
+            c.setFillColor(NAVY)
+            c.setFont(FONT_BOLD, 13)
+            c.drawString(x, price_y - 1, _fmt_brl(amt))
+
+        if quote.dual_pricing:
+            # Dois preços por item: varejo (unit_value) e atacado
+            # (unit_value_wholesale, caindo no varejo se em branco). Mesmo markup
+            # do varejo, para reconciliar com os totais.
+            wholesale_unit = item.unit_value_wholesale
+            if wholesale_unit is None:
+                wholesale_unit = item.unit_value
+            _price_block(txt_x, f"varejo · {qty_label}", unit_price)
+            _price_block(txt_x + txt_w / 2, f"atacado · {qty_label}",
+                         wholesale_unit * markup_mult)
+        else:
+            _price_block(txt_x, qty_label, unit_price)
 
         bot_y = y_top - ITEM_H
         c.setStrokeColor(RULE)
@@ -1312,9 +1385,9 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
         c.drawRightString(MX + CW, ty + 1, "Orçamento válido por 03 dias")
         ty -= 17
 
-        # Só afirma "grátis" quando de fato não há frete cobrado (freight_value=0);
-        # com frete embutido no total, dizer "grátis" seria contraditório.
-        if quote.freight_responsible == FreightResponsible.STORE and not quote.freight_value:
+        # Frete por conta da loja (STORE) nunca é cobrado do cliente — a loja
+        # arca com o custo e ele fica fora do total —, então é sempre "grátis".
+        if quote.freight_responsible == FreightResponsible.STORE:
             c.setFillColor(GRAY)
             c.setFont(FONT_REG, 8.5)
             c.drawString(MX, ty, "Entrega e montagem grátis pela equipe Roselar Móveis.")
@@ -1419,12 +1492,29 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
         c.roundRect(MX, bar_y, CW, bar_h, 6, fill=1, stroke=0)
 
         total_lbl = "Valor do investimento com desconto" if disc_pct > 0 else "Valor do investimento"
+        if quote.dual_pricing:
+            total_lbl = "Valor do investimento — Varejo"
         c.setFillColor(WHITE)
         c.setFont(FONT_REG, 9.5)
         c.drawString(MX + 16, bar_y + bar_h / 2 - 3, total_lbl)
         c.setFillColor(WHITE)
         c.setFont(FONT_BOLD, 17)
         c.drawRightString(MX + CW - 16, bar_y + bar_h / 2 - 6, _fmt_brl(avista))
+
+        # ── Total de atacado (orçamento atacado + varejo) ────────────────
+        if quote.dual_pricing:
+            avista_atacado = quote.calculate_rounded_total_wholesale()
+            ty = bar_y - 10
+            atac_h = 34
+            atac_y = ty - atac_h
+            c.setStrokeColor(NAVY)
+            c.setLineWidth(1)
+            c.roundRect(MX, atac_y, CW, atac_h, 6, fill=0, stroke=1)
+            c.setFillColor(NAVY)
+            c.setFont(FONT_REG, 9.5)
+            c.drawString(MX + 16, atac_y + atac_h / 2 - 3, "Valor do investimento — Atacado")
+            c.setFont(FONT_BOLD, 15)
+            c.drawRightString(MX + CW - 16, atac_y + atac_h / 2 - 5, _fmt_brl(avista_atacado))
 
     _items_page_bg()
     cur_y = _draw_header()
@@ -3134,7 +3224,9 @@ def quote_simulate_commission(request: HttpRequest, quote_id: int) -> HttpRespon
         return redirect("sales:quote_list")
 
     subtotal = quote.calculate_subtotal()
-    freight_value = quote.freight_value or Decimal("0.00")
+    # Frete por conta da loja (STORE) não é repassado ao cliente: fica fora do
+    # total e da comissão. billable_freight já zera esse caso.
+    freight_value = quote.billable_freight
 
     if request.method == "POST":
         sim_payment_type    = request.POST.get('sim_payment_type', '') or ''
