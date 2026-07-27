@@ -1085,17 +1085,19 @@ def report_commissions(request):
     )
 
     # Divisão de comissão: quando existe, valor e faturamento são partidos
-    # igualmente entre os participantes.
+    # igualmente entre os participantes. Guarda o papel junto porque o
+    # financeiro entra na CONTAGEM das partes mas não recebe a dele.
     split_map: dict[int, list] = {}
     for sp in (
         QuoteCommissionSplit.objects
         .filter(quote__in=qs)
         .prefetch_related("users")
     ):
-        # Financeiro não recebe comissão: fica fora da divisão.
-        users = [u for u in sp.users.all() if u.role != Role.FINANCE]
+        users = list(sp.users.all())
         if users:
-            split_map[sp.quote_id] = [(u.pk, u.get_full_name() or u.username) for u in users]
+            split_map[sp.quote_id] = [
+                (u.pk, u.get_full_name() or u.username, u.role) for u in users
+            ]
 
     seller_totals = defaultdict(
         lambda: {
@@ -1125,36 +1127,34 @@ def report_commissions(request):
             pending_count += 1
             continue
 
-        recipients = split_map.get(q.pk)
-        if recipients is None:
-            # Sem divisão cadastrada: a comissão é do vendedor do orçamento —
-            # a menos que ele seja do financeiro, que não recebe comissão.
-            if q.seller.role == Role.FINANCE:
-                recipients = []
-            else:
-                recipients = [(q.seller_id, q.seller.get_full_name() or q.seller.username)]
+        recipients = split_map.get(q.pk) or [
+            (q.seller_id, q.seller.get_full_name() or q.seller.username, q.seller.role)
+        ]
+        earners = [r for r in recipients if r[2] != Role.FINANCE]
 
-        if not recipients:
-            # Venda inteiramente sob responsabilidade do financeiro. Sai das
-            # linhas E do total, senão a soma da coluna não bateria com o topo.
+        if not earners:
+            # Venda cujo responsável é do financeiro. Ele não vende, apenas
+            # aprova, então a comissão não existe — não é repassada a ninguém.
+            # Sai das linhas E do total; o cabeçalho continua contando a venda.
             finance_count += 1
             continue
 
         if q.commission_source == CommissionSource.BACKFILL:
             estimated_count += 1
 
-        commission = q.commission_value
-        total_commission += commission
         discount = q.discount_percent or Decimal("0")
-
+        # Divide pelo total de participantes, não só pelos que recebem: a parte
+        # do financeiro evapora em vez de engordar a do vendedor.
         shares = Decimal(len(recipients))
-        for uid, uname in recipients:
+
+        for uid, uname, _role in earners:
             bucket = seller_totals[uid]
             bucket["seller_name"] = uname
             bucket["total_sold"] += value / shares
-            bucket["commission"] += commission / shares
+            bucket["commission"] += q.commission_value / shares
             bucket["count"] += 1
             bucket["disc_sum"] += discount
+            total_commission += q.commission_value / shares
 
     commissions = []
     for _uid, data in sorted(seller_totals.items(), key=lambda kv: -kv[1]["total_sold"]):

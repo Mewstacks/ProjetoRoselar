@@ -263,7 +263,8 @@ class FinanceExclusionTests(ReportTestBase):
         self.assertEqual(sum(r["est_commission"] for r in rows), vend.commission_value)
         self.assertEqual(resp.context["sales_count"], 2)
 
-    def test_finance_removed_from_a_split_without_losing_the_rest(self):
+    def test_finance_share_evaporates_instead_of_going_to_the_seller(self):
+        """A comissão do financeiro não vai para ninguém — nem para o colega."""
         quote = self._sold("V-SPLIT", self.seller)
         split = QuoteCommissionSplit.objects.create(quote=quote)
         split.users.set([self.seller, self.finance])
@@ -272,8 +273,9 @@ class FinanceExclusionTests(ReportTestBase):
         rows = resp.context["commissions"]
 
         self.assertEqual([r["seller"] for r in rows], ["vendedor"])
-        # Sem o financeiro na divisão, o vendedor fica com a comissão inteira.
-        self.assertEqual(rows[0]["est_commission"], quote.commission_value)
+        # Divisão entre 2: o vendedor leva a metade dele, a outra metade some.
+        self.assertEqual(rows[0]["est_commission"], quote.commission_value / 2)
+        self.assertEqual(resp.context["total_commission"], quote.commission_value / 2)
 
 
 class DiscountReportTests(ReportTestBase):
