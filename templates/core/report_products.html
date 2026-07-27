@@ -43,7 +43,7 @@
         <div class="bg-white shadow-sm" style="border-radius:8px;overflow:hidden;">
           <div class="table-responsive">
             <table class="table table-hover mb-0" style="font-size:.85rem;">
-              <thead style="background:var(--brand);color:#fff;"><tr><th>#</th><th>Produto</th><th class="text-end">Qtd Vendida</th><th class="text-end">Total (R$)</th></tr></thead>
+              <thead style="background:var(--brand);color:#fff;"><tr><th>#</th><th>Produto</th><th class="text-end">Qtd Vendida</th><th class="text-end">Receita Líquida (R$)</th></tr></thead>
               <tbody>
                 {% for item in items %}
                 <tr>
@@ -56,6 +56,9 @@
                 <tr><td colspan="4" class="text-center text-muted py-4">Nenhum dado encontrado.</td></tr>
                 {% endfor %}
               </tbody>
+              {% if items %}
+              <tfoot><tr style="border-top:2px solid var(--brand);"><td colspan="3" class="fw-bold text-end">Total dos 50 primeiros</td><td class="text-end fw-bold">R$ {{ total_value|floatformat:2 }}</td></tr></tfoot>
+              {% endif %}
             </table>
           </div>
         </div>

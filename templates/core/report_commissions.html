@@ -40,10 +40,24 @@
           </form>
         </div>
 
+        <div class="row g-3 mb-4">
+          <div class="col-md-4"><div class="bg-white border p-3 text-center" style="border-radius:8px;"><div style="font-size:.75rem;color:#6c757d;text-transform:uppercase;font-weight:600;">Vendas no Período</div><div class="fw-bold fs-4" style="color:var(--brand);">{{ sales_count }}</div></div></div>
+          <div class="col-md-4"><div class="bg-white border p-3 text-center" style="border-radius:8px;"><div style="font-size:.75rem;color:#6c757d;text-transform:uppercase;font-weight:600;">Faturamento</div><div class="fw-bold fs-4" style="color:var(--brand);">R$ {{ total_sold_period|floatformat:2 }}</div></div></div>
+          <div class="col-md-4"><div class="bg-white border p-3 text-center" style="border-radius:8px;"><div style="font-size:.75rem;color:#6c757d;text-transform:uppercase;font-weight:600;">Comissão Total</div><div class="fw-bold fs-4" style="color:#198754;">R$ {{ total_commission|floatformat:2 }}</div></div></div>
+        </div>
+
+        {% if pending_count or estimated_count %}
+        <div class="bg-white border p-3 mb-4" style="border-radius:8px;">
+          <div class="fw-bold mb-2" style="font-size:1.05rem;color:var(--brand);">Sobre a apuração</div>
+          {% if estimated_count %}<div class="small text-muted">{{ estimated_count }} venda{{ estimated_count|pluralize }} com comissão <strong>estimada retroativamente</strong>: foram fechadas antes de o sistema gravar a comissão e não têm o valor de entrada registrado.</div>{% endif %}
+          {% if pending_count %}<div class="small text-muted">{{ pending_count }} venda{{ pending_count|pluralize }} <strong>sem comissão apurada</strong> — fora dos totais acima. Reabra as condições no simulador e salve para apurar.</div>{% endif %}
+        </div>
+        {% endif %}
+
         <div class="bg-white shadow-sm" style="border-radius:8px;overflow:hidden;">
           <div class="table-responsive">
             <table class="table table-hover mb-0" style="font-size:.85rem;">
-              <thead style="background:var(--brand);color:#fff;"><tr><th>Vendedor</th><th>Vendas</th><th class="text-end">Total Vendido</th><th>Desc. Médio</th><th>% Comissão</th><th class="text-end">Comissão Estimada</th></tr></thead>
+              <thead style="background:var(--brand);color:#fff;"><tr><th>Vendedor</th><th>Vendas (participações)</th><th class="text-end">Total Vendido</th><th>Desc. Médio</th><th>% s/ faturamento</th><th class="text-end">Comissão</th></tr></thead>
               <tbody>
                 {% for c in commissions %}
                 <tr>
@@ -61,6 +75,7 @@
             </table>
           </div>
         </div>
+        <p class="small text-muted mt-2 mb-0">Vendas divididas entre vendedores contam uma participação para cada um, por isso a coluna soma mais que as {{ sales_count }} venda{{ sales_count|pluralize }} do período. Faturamento e comissão são rateados igualmente.</p>
       </div>
     </section>
     <section class="pt-4 pb-3" style="background:var(--brand);color:#fff;"><div class="container text-center"><p class="mb-0">&copy; 2026 Roselar.</p></div></section>

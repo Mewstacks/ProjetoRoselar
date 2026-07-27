@@ -41,6 +41,7 @@
               <div><label class="form-label small fw-bold mb-0">Até</label><input type="date" name="date_to" value="{{ date_to }}" class="form-control form-control-sm"></div>
               <div><label class="form-label small fw-bold mb-0">Vendedor</label><select name="seller" class="form-control form-control-sm"><option value="">Todos</option>{% for s in sellers %}<option value="{{ s.id }}" {% if seller_id == s.id|stringformat:"d" %}selected{% endif %}>{{ s.username }}</option>{% endfor %}</select></div>
               <button type="submit" class="btn btn-primary btn-sm"><i class="fa-solid fa-search me-1"></i>Filtrar</button>
+              <a href="{% url 'core:report_csv_export' %}?date_from={{ date_from }}&amp;date_to={{ date_to }}&amp;seller={{ seller_id }}" class="btn btn-outline-dark btn-sm"><i class="fa-solid fa-file-csv me-1"></i>Exportar CSV</a>
             </form>
           </div>
         </div>

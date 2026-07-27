@@ -8,12 +8,12 @@ from decimal import Decimal
 
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
-from django.db.models import Sum, Count, Q, F, Avg
+from django.db.models import Sum, Count, Q, Avg
 
 
 def health_check(request):
     return HttpResponse("ok", content_type="text/plain")
-from django.db.models.functions import TruncMonth, Coalesce
+from django.core.paginator import Paginator
 from django.http import JsonResponse, HttpRequest, HttpResponse
 from django.shortcuts import render, get_object_or_404, redirect
 from django.utils import timezone
@@ -28,7 +28,10 @@ from .models import (
     CommunicationHistory,
     QuoteTemplate, QuoteTemplateItem,
 )
-from sales.models import Quote, QuoteStatus, SOLD_STATUSES, Order, OrderStatus, QuoteItem
+from sales.models import (
+    Quote, QuoteStatus, SOLD_STATUSES, Order, OrderStatus,
+    QuoteCommissionSplit, CommissionSource,
+)
 from accounts.models import User, Role
 from calendar_app.models import CalendarEvent, EventStatus
 
@@ -101,18 +104,6 @@ def _last_n_month_starts(day: date_type, n: int = 6) -> list[date_type]:
     return starts
 
 
-def _normalize_month_key(value):
-    return value.date() if hasattr(value, "date") else value
-
-
-def _build_month_series(rows, month_starts: list[date_type]) -> tuple[list[str], list[float], list[int]]:
-    rows_by_month = {_normalize_month_key(r["month"]): r for r in rows}
-    labels = [m.strftime("%b/%y") for m in month_starts]
-    totals = [float((rows_by_month.get(m, {}) or {}).get("total") or 0) for m in month_starts]
-    counts = [int((rows_by_month.get(m, {}) or {}).get("count") or 0) for m in month_starts]
-    return labels, totals, counts
-
-
 def _net_quote_value(quote) -> Decimal:
     """Returns the quote's customer-facing total.
 
@@ -123,7 +114,8 @@ def _net_quote_value(quote) -> Decimal:
 
 
 def _sum_net_quote_values(quotes) -> Decimal:
-    return sum((_net_quote_value(q) for q in quotes), Decimal("0"))
+    """Soma o faturamento de um queryset de vendas no banco, não em memória."""
+    return quotes.aggregate(total=Sum("total_value_snapshot"))["total"] or Decimal("0")
 
 
 def _build_net_month_series_from_quotes(quotes, month_starts: list[date_type]) -> tuple:
@@ -183,7 +175,7 @@ def home(request):
             my_quotes.sold().filter(
                 sold_on__gte=prev_month_start,
                 sold_on__lte=prev_month_end,
-            ).only("total_value_snapshot")
+            )
         )
 
         # Goal — source of truth is user.individual_target_value set in admin
@@ -344,17 +336,17 @@ def home(request):
             bi_status_values = [d["count"] for d in bi_status_data]
 
             # ── BI: Top 10 products by revenue ──
-            bi_top_products = list(
-                QuoteItem.objects.filter(quote__status__in=SOLD_STATUSES)
-                .annotate(sold_on=Coalesce("quote__sale_date", "quote__quote_date"))
-                .filter(sold_on__gte=month_start)
-                .values("product_name")
-                .annotate(
-                    total_revenue=Sum(F("quantity") * F("unit_value")),
-                    total_qty=Sum("quantity"),
-                )
-                .order_by("-total_revenue")[:10]
-            )
+            # Mesma apuração do Relatório de Produtos (receita líquida rateada),
+            # e agora limitada ao fim do ciclo — antes só havia piso de data, e
+            # vendas com data futura entravam no mês corrente.
+            bi_top_products = [
+                {
+                    "product_name": p["product_name"],
+                    "total_revenue": p["total_value"],
+                    "total_qty": p["qty"],
+                }
+                for p in _product_revenue(month_start, month_end, limit=10)
+            ]
             bi_prod_labels = [p["product_name"][:25] for p in bi_top_products]
             bi_prod_values = [float(p["total_revenue"] or 0) for p in bi_top_products]
 
@@ -441,9 +433,7 @@ def dashboard(request):
     my_converted = my_quotes.sold()
     my_converted_month = my_converted.filter(sold_on__gte=month_start, sold_on__lte=month_end)
 
-    my_total_sold_month = _sum_net_quote_values(
-        my_converted_month.only("total_value_snapshot")
-    )
+    my_total_sold_month = _sum_net_quote_values(my_converted_month)
     my_quotes_count_month = my_quotes_month.count()
     my_converted_count_month = my_converted_month.count()
     # Conversão por coorte: dos orçamentos criados no ciclo, quantos viraram venda
@@ -463,9 +453,7 @@ def dashboard(request):
         sold_on__gte=prev_month_start,
         sold_on__lte=prev_month_end,
     )
-    prev_total = _sum_net_quote_values(
-        prev_converted.only("total_value_snapshot")
-    )
+    prev_total = _sum_net_quote_values(prev_converted)
 
     # ── My Goal — source of truth is user.individual_target_value set in admin ──
     goal_target = user.individual_target_value or Decimal("0")
@@ -955,6 +943,79 @@ def _parse_date_param(raw, fallback):
         return fallback
 
 
+def _report_period(request) -> tuple[date_type, date_type]:
+    """Período dos relatórios: mês de vendas corrente (25→24) por padrão.
+
+    Datas invertidas eram aceitas em silêncio e devolviam relatório vazio, o que
+    lê como "não houve venda" em vez de "o filtro está errado". Aqui a inversão
+    é corrigida e avisada.
+    """
+    today = timezone.localdate()
+    date_from = _parse_date_param(request.GET.get("date_from"), _month_bounds(today)[0])
+    date_to = _parse_date_param(request.GET.get("date_to"), today)
+    if date_from > date_to:
+        date_from, date_to = date_to, date_from
+        messages.warning(request, "Data inicial maior que a final — as datas foram invertidas.")
+    return date_from, date_to
+
+
+def _product_revenue(date_from, date_to, limit: int = 50) -> list[dict]:
+    """Ranking de produtos por RECEITA LÍQUIDA no período.
+
+    Somar `quantidade × valor_unitário` dá o preço de tabela: ignora desconto,
+    acréscimo, arredondamento e preço final digitado (total_override). O ranking
+    resultante nunca fecha com o Relatório de Vendas.
+
+    Aqui o total real da venda é rateado entre os itens na proporção do valor de
+    cada um. O frete sai da conta — não é receita de produto —, então a soma da
+    coluna reconcilia com o total vendido menos o frete repassado.
+
+    `product_name` é texto livre (não existe catálogo), então "Mesa", "MESA" e
+    "Mesa " são o mesmo produto e precisam ser agrupados; a grafia exibida é a
+    mais frequente.
+    """
+    buckets: dict[str, dict] = {}
+
+    quotes = (
+        Quote.objects.sold()
+        .filter(sold_on__gte=date_from, sold_on__lte=date_to)
+        .prefetch_related("items")
+    )
+
+    for quote in quotes:
+        subtotal = quote.calculate_subtotal()
+        if subtotal <= 0:
+            continue
+        # total_value_snapshot já embute desconto, acréscimo, arredondamento e
+        # total_override; tirando o frete sobra a receita atribuível a produto.
+        net_products = (quote.total_value_snapshot or Decimal("0")) - quote.billable_freight
+        factor = max(Decimal("0"), net_products) / subtotal
+
+        for item in quote.items.all():
+            raw_name = (item.product_name or "").strip()
+            key = raw_name.casefold()
+            if not key:
+                continue
+            bucket = buckets.setdefault(
+                key,
+                {"qty": 0, "total_value": Decimal("0"), "names": defaultdict(int)},
+            )
+            bucket["qty"] += item.quantity
+            bucket["total_value"] += item.line_total * factor
+            bucket["names"][raw_name] += 1
+
+    rows = [
+        {
+            "product_name": max(b["names"].items(), key=lambda kv: kv[1])[0],
+            "qty": b["qty"],
+            "total_value": b["total_value"].quantize(Decimal("0.01")),
+        }
+        for b in buckets.values()
+    ]
+    rows.sort(key=lambda r: r["total_value"], reverse=True)
+    return rows[:limit]
+
+
 @login_required
 def reports_hub(request):
     if not _is_admin_user(request.user):
@@ -963,27 +1024,33 @@ def reports_hub(request):
     return render(request, "core/reports_hub.html")
 
 
+def _sales_queryset(date_from, date_to, seller_id=""):
+    """Vendas do período — universo único usado pela tela de Vendas e pelo CSV.
+
+    Compartilhado para que a exportação não possa divergir do que está na tela.
+    """
+    qs = Quote.objects.sold().filter(sold_on__gte=date_from, sold_on__lte=date_to)
+    if seller_id:
+        try:
+            qs = qs.filter(seller_id=int(seller_id))
+        except (TypeError, ValueError):
+            pass
+    return qs
+
+
 @login_required
 def report_sales(request):
     if not _is_admin_user(request.user):
         messages.error(request, "Acesso negado.")
         return redirect("core:index")
-    today = timezone.localdate()
-    date_from = _parse_date_param(request.GET.get("date_from"), _month_bounds(today)[0]).isoformat()
-    date_to = _parse_date_param(request.GET.get("date_to"), today).isoformat()
+    date_from, date_to = _report_period(request)
     seller_id = request.GET.get("seller", "")
 
-    qs = Quote.objects.sold().filter(
-        sold_on__gte=date_from,
-        sold_on__lte=date_to,
-    ).select_related("customer", "seller")
+    qs = _sales_queryset(date_from, date_to, seller_id).select_related("customer", "seller")
 
-    if seller_id:
-        qs = qs.filter(seller_id=seller_id)
-
-    total = qs.aggregate(total=Sum("total_value_snapshot"))["total"] or 0
+    total = qs.aggregate(total=Sum("total_value_snapshot"))["total"] or Decimal("0")
     count = qs.count()
-    avg_value = round(total / count, 2) if count > 0 else 0
+    avg_value = round(total / count, 2) if count > 0 else Decimal("0")
 
     sellers = User.objects.filter(is_active=True).order_by("username")
 
@@ -992,8 +1059,8 @@ def report_sales(request):
         "total": total,
         "count": count,
         "avg_value": avg_value,
-        "date_from": date_from,
-        "date_to": date_to,
+        "date_from": date_from.isoformat(),
+        "date_to": date_to.isoformat(),
         "seller_id": seller_id,
         "sellers": sellers,
     })
@@ -1004,53 +1071,22 @@ def report_commissions(request):
     if not _is_admin_user(request.user):
         messages.error(request, "Acesso negado.")
         return redirect("core:index")
-    today = timezone.localdate()
-    date_from = _parse_date_param(request.GET.get("date_from"), _month_bounds(today)[0]).isoformat()
-    date_to = _parse_date_param(request.GET.get("date_to"), today).isoformat()
+    date_from, date_to = _report_period(request)
 
-    from core.models import SalesMarginConfig
-    TOTAL_MARGIN, MIN_COMM, MAX_COMM = SalesMarginConfig.get_config()
+    # A comissão NÃO é recalculada aqui. Ela foi apurada pelo motor de margem no
+    # fechamento da venda (sales.margin.persist_quote_commission) e congelada no
+    # orçamento. Qualquer tentativa de reconstruí-la neste ponto produziria um
+    # número diferente do que o vendedor viu no simulador — era exatamente esse o
+    # defeito da versão anterior.
+    qs = (
+        Quote.objects.sold()
+        .filter(sold_on__gte=date_from, sold_on__lte=date_to)
+        .select_related("seller")
+    )
 
-    qs = Quote.objects.sold().filter(
-        sold_on__gte=date_from,
-        sold_on__lte=date_to,
-    ).select_related("seller")
-
-    MAX_DISC = 30.0
-
-    def _per_quote_commission_pct(payment_type, discount, fee, installments):
-        """Comissão estimada por orçamento — espelha a lógica de _run_simulation.
-
-        PIX/CASH:          clamp(12 - desc, 2, 5)
-        Débito:            4% fixo
-        Crédito/Boleto 1x-6x: 3% fixo
-        Crédito/Boleto 7x+:   clamp(12 - taxa - desc, 2, 4)
-        Outros/Cheque:     clamp(12 - taxa - desc, 2, 4)
-        """
-        disc = float(discount or 0)
-        fee_pct = float(fee or 0)
-        inst = int(installments or 1)
-        if payment_type in ('PIX', 'CASH'):
-            mld = 12.0 - disc
-            return round(max(2.0, min(mld, 5.0)), 2)
-        elif payment_type == 'DEBIT_CARD':
-            return 4.0
-        elif payment_type in ('CREDIT_CARD', 'BOLETO'):
-            if inst >= 7:
-                mld = 12.0 - fee_pct - disc
-                return round(max(2.0, min(mld, 4.0)), 2)
-            return 3.0
-        else:
-            # Cheque, sem forma, etc.
-            mld = 12.0 - fee_pct - disc
-            return round(max(2.0, min(mld, 4.0)), 2)
-
-    from collections import defaultdict
-    seller_totals = defaultdict(lambda: {"total_sold": 0.0, "commission": 0.0, "count": 0, "disc_sum": 0.0, "seller_name": ""})
-
-    # Pre-fetch commission splits for all quotes in the queryset
-    from sales.models import QuoteCommissionSplit
-    split_map: dict[int, list] = {}  # quote_id -> list of (user_id, username)
+    # Divisão de comissão: quando existe, valor e faturamento são partidos
+    # igualmente entre os participantes.
+    split_map: dict[int, list] = {}
     for sp in (
         QuoteCommissionSplit.objects
         .filter(quote__in=qs)
@@ -1060,50 +1096,76 @@ def report_commissions(request):
         if users:
             split_map[sp.quote_id] = [(u.pk, u.get_full_name() or u.username) for u in users]
 
-    for q in qs.select_related("seller"):
-        val = float(q.total_value_snapshot or 0)
-        comm_pct = _per_quote_commission_pct(q.payment_type, q.discount_percent, q.payment_fee_percent, q.payment_installments)
-        comm_value = val * comm_pct / 100
-        disc = float(q.discount_percent or 0)
+    seller_totals = defaultdict(
+        lambda: {
+            "seller_name": "",
+            "total_sold": Decimal("0"),
+            "commission": Decimal("0"),
+            "count": 0,
+            "disc_sum": Decimal("0"),
+        }
+    )
 
-        recipients = split_map.get(q.pk)
-        if recipients:
-            share = comm_value / len(recipients)
-            share_val = val / len(recipients)
-            for uid, uname in recipients:
-                seller_totals[uid]["seller_name"] = uname
-                seller_totals[uid]["total_sold"] += share_val
-                seller_totals[uid]["commission"] += share
-                seller_totals[uid]["count"] += 1
-                seller_totals[uid]["disc_sum"] += disc
-        else:
-            sid = q.seller_id
-            seller_totals[sid]["seller_name"] = q.seller.get_full_name() or q.seller.username
-            seller_totals[sid]["total_sold"] += val
-            seller_totals[sid]["commission"] += comm_value
-            seller_totals[sid]["count"] += 1
-            seller_totals[sid]["disc_sum"] += disc
+    sales_count = 0          # vendas reais no período (não é a soma da coluna)
+    pending_count = 0        # vendas sem comissão apurada
+    estimated_count = 0      # comissão estimada retroativamente (BACKFILL)
+    total_commission = Decimal("0")
+    total_sold_period = Decimal("0")
+
+    for q in qs:
+        sales_count += 1
+        value = q.total_value_snapshot or Decimal("0")
+        total_sold_period += value
+
+        if q.commission_value is None:
+            # Venda sem comissão apurada — fica de fora da soma, mas é
+            # sinalizada na tela em vez de virar zero silenciosamente.
+            pending_count += 1
+            continue
+        if q.commission_source == CommissionSource.BACKFILL:
+            estimated_count += 1
+
+        commission = q.commission_value
+        total_commission += commission
+        discount = q.discount_percent or Decimal("0")
+
+        recipients = split_map.get(q.pk) or [
+            (q.seller_id, q.seller.get_full_name() or q.seller.username)
+        ]
+        shares = Decimal(len(recipients))
+        for uid, uname in recipients:
+            bucket = seller_totals[uid]
+            bucket["seller_name"] = uname
+            bucket["total_sold"] += value / shares
+            bucket["commission"] += commission / shares
+            bucket["count"] += 1
+            bucket["disc_sum"] += discount
 
     commissions = []
-    for sid, data in sorted(seller_totals.items(), key=lambda x: -x[1]["total_sold"]):
+    for _uid, data in sorted(seller_totals.items(), key=lambda kv: -kv[1]["total_sold"]):
         count = data["count"]
-        avg_disc = data["disc_sum"] / count if count else 0
         total_sold = data["total_sold"]
         est_commission = data["commission"]
-        comm_pct = est_commission / total_sold * 100 if total_sold else 0
         commissions.append({
             "seller": data["seller_name"],
-            "total_sold": round(total_sold, 2),
+            "total_sold": total_sold.quantize(Decimal("0.01")),
             "count": count,
-            "avg_discount": round(avg_disc, 1),
-            "comm_pct": round(comm_pct, 1),
-            "est_commission": round(est_commission, 2),
+            "avg_discount": round(data["disc_sum"] / count, 1) if count else Decimal("0"),
+            # Razão comissão/faturamento do vendedor. Não é o % do motor: aquele
+            # incide só sobre produtos, este é sobre o faturamento (com frete).
+            "comm_pct": round(est_commission / total_sold * 100, 1) if total_sold else Decimal("0"),
+            "est_commission": est_commission.quantize(Decimal("0.01")),
         })
 
     return render(request, "core/report_commissions.html", {
         "commissions": commissions,
-        "date_from": date_from,
-        "date_to": date_to,
+        "sales_count": sales_count,
+        "pending_count": pending_count,
+        "estimated_count": estimated_count,
+        "total_commission": total_commission.quantize(Decimal("0.01")),
+        "total_sold_period": total_sold_period.quantize(Decimal("0.01")),
+        "date_from": date_from.isoformat(),
+        "date_to": date_to.isoformat(),
     })
 
 
@@ -1112,25 +1174,44 @@ def report_discounts(request):
     if not _is_admin_user(request.user):
         messages.error(request, "Acesso negado.")
         return redirect("core:index")
-    today = timezone.localdate()
-    date_from = _parse_date_param(request.GET.get("date_from"), _month_bounds(today)[0]).isoformat()
-    date_to = _parse_date_param(request.GET.get("date_to"), today).isoformat()
+    date_from, date_to = _report_period(request)
+    # Padrão: só vendas. Antes o relatório varria TODOS os orçamentos, inclusive
+    # cancelados e rascunhos, o que contaminava a média de desconto com
+    # negociações que nunca existiram. Cancelado nunca entra, nem no modo amplo.
+    sold_only = request.GET.get("sold_only", "1") != "0"
 
-    qs = Quote.objects.filter(
-        quote_date__gte=date_from,
-        quote_date__lte=date_to,
-        discount_percent__gt=0,
-    ).select_related("seller", "customer", "discount_authorized_by").order_by("-discount_percent")
+    if sold_only:
+        # Mesma base de data dos demais relatórios (data da venda), para que os
+        # números conversem entre as telas.
+        qs = Quote.objects.sold().filter(sold_on__gte=date_from, sold_on__lte=date_to)
+    else:
+        qs = Quote.objects.exclude(status=QuoteStatus.CANCELED).filter(
+            quote_date__gte=date_from, quote_date__lte=date_to,
+        )
 
-    avg = qs.aggregate(avg=Avg("discount_percent"))["avg"] or 0
+    qs = (
+        qs.filter(discount_percent__gt=0)
+        .select_related("seller", "customer", "discount_authorized_by")
+        .order_by("-discount_percent")
+    )
+
+    avg = qs.aggregate(avg=Avg("discount_percent"))["avg"] or Decimal("0")
     authorized_count = qs.filter(discount_authorized_by__isnull=False).count()
+    total_count = qs.count()
+
+    paginator = Paginator(qs, 50)
+    page = paginator.get_page(request.GET.get("page"))
 
     return render(request, "core/report_discounts.html", {
-        "quotes": qs,
+        "quotes": page,
+        "page_obj": page,
         "avg_discount": round(avg, 1),
         "authorized_count": authorized_count,
-        "date_from": date_from,
-        "date_to": date_to,
+        "total_count": total_count,
+        "sold_only": sold_only,
+        "date_basis": "data da venda" if sold_only else "data do orçamento",
+        "date_from": date_from.isoformat(),
+        "date_to": date_to.isoformat(),
     })
 
 
@@ -1139,26 +1220,15 @@ def report_products(request):
     if not _is_admin_user(request.user):
         messages.error(request, "Acesso negado.")
         return redirect("core:index")
-    today = timezone.localdate()
-    date_from = _parse_date_param(request.GET.get("date_from"), _month_bounds(today)[0]).isoformat()
-    date_to = _parse_date_param(request.GET.get("date_to"), today).isoformat()
+    date_from, date_to = _report_period(request)
 
-    items = (
-        QuoteItem.objects.filter(quote__status__in=SOLD_STATUSES)
-        .annotate(sold_on=Coalesce("quote__sale_date", "quote__quote_date"))
-        .filter(sold_on__gte=date_from, sold_on__lte=date_to)
-        .values("product_name")
-        .annotate(
-            qty=Sum("quantity"),
-            total_value=Sum(F("quantity") * F("unit_value")),
-        )
-        .order_by("-total_value")[:50]
-    )
+    items = _product_revenue(date_from, date_to, limit=50)
 
     return render(request, "core/report_products.html", {
         "items": items,
-        "date_from": date_from,
-        "date_to": date_to,
+        "total_value": sum((i["total_value"] for i in items), Decimal("0")),
+        "date_from": date_from.isoformat(),
+        "date_to": date_to.isoformat(),
     })
 
 
@@ -1168,17 +1238,21 @@ def report_csv_export(request):
         messages.error(request, "Acesso negado.")
         return redirect("core:index")
     import csv
-    today = timezone.localdate()
-    date_from = _parse_date_param(request.GET.get("date_from"), _month_bounds(today)[0]).isoformat()
-    date_to = _parse_date_param(request.GET.get("date_to"), today).isoformat()
+    date_from, date_to = _report_period(request)
+    # O filtro de vendedor da tela de Vendas precisa valer aqui também: sem isso
+    # o admin filtra, exporta e recebe um arquivo com o time inteiro.
+    seller_id = request.GET.get("seller", "")
 
-    qs = Quote.objects.sold().filter(
-        sold_on__gte=date_from,
-        sold_on__lte=date_to,
-    ).select_related("customer", "seller").order_by("-sold_on")
+    qs = (
+        _sales_queryset(date_from, date_to, seller_id)
+        .select_related("customer", "seller")
+        .order_by("-sold_on")
+    )
 
     response = HttpResponse(content_type="text/csv")
-    response["Content-Disposition"] = f'attachment; filename="vendas_{date_from}_{date_to}.csv"'
+    response["Content-Disposition"] = (
+        f'attachment; filename="vendas_{date_from.isoformat()}_{date_to.isoformat()}.csv"'
+    )
     response.write('\ufeff')
 
     def _csv_safe(value):

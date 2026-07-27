@@ -195,6 +195,42 @@ class OrderDateSyncTests(TestCase):
         self.quote.refresh_from_db()
         self.assertEqual(self.quote.sale_date, date(2026, 6, 24))
 
+    def test_editing_order_date_propagates_to_sibling_orders(self):
+        """A data de emissão é uma só para a venda: todos os pedidos acompanham."""
+        from core.models import Supplier
+
+        supplier = Supplier.objects.create(name="Fornecedor A")
+        sibling = Order.objects.create(
+            number="ORC-9999-A",
+            quote=self.quote,
+            supplier=supplier,
+            status=OrderStatus.PENDING,
+        )
+
+        self.client.login(username="admin", password="x")
+        resp = self.client.post(
+            reverse("sales:order_edit", args=[self.order.id]),
+            {
+                "supplier": "",
+                "status": OrderStatus.PENDING,
+                "created_at": "2026-06-24T10:00",
+                "purchase_condition_text": "",
+                "transport_info": "",
+                "delivery_deadline": "",
+                "notes": "",
+                "items-TOTAL_FORMS": "0",
+                "items-INITIAL_FORMS": "0",
+                "items-MIN_NUM_FORMS": "0",
+                "items-MAX_NUM_FORMS": "1000",
+            },
+        )
+
+        self.assertEqual(resp.status_code, 302, getattr(resp, "context", None) and resp.context["form"].errors)
+        self.order.refresh_from_db()
+        sibling.refresh_from_db()
+        self.assertEqual(sibling.created_at, self.order.created_at)
+        self.assertEqual(timezone.localtime(sibling.created_at).date(), date(2026, 6, 24))
+
 
 class SimulationTariffTests(TestCase):
     """Simulador não pode liberar parcela cujo custo do banco é desconhecido."""

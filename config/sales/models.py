@@ -75,6 +75,20 @@ ROUNDING_STEPS = {
 }
 
 
+class CommissionSource(models.TextChoices):
+    """Como a comissão gravada no orçamento foi obtida.
+
+    ENGINE   — apurada pelo motor de margem no fechamento da venda, com todos
+               os parâmetros da venda disponíveis. É o número confiável.
+    BACKFILL — estimada retroativamente pela migração para vendas fechadas
+               antes deste campo existir. A entrada (down payment) daquelas
+               vendas não foi registrada, então é aproximação, e os relatórios
+               precisam sinalizar isso.
+    """
+    ENGINE = "ENGINE", "Apurada no fechamento"
+    BACKFILL = "BACKFILL", "Estimada retroativamente"
+
+
 class QuoteQuerySet(models.QuerySet):
     def sold(self):
         """Orçamentos que contam como venda (convertidos, inclusive em Pós-Venda).
@@ -285,8 +299,40 @@ class Quote(models.Model):
     # observações gerais do orçamento
     notes = models.TextField(blank=True, verbose_name="Observações")
 
+    # entrada (down payment) usada na simulação. Precisa ser persistida: sem ela
+    # a comissão apurada pelo motor de margem é irreproduzível depois da venda.
+    down_payment_value = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        verbose_name="Entrada (R$)",
+    )
+
     # snapshots
     total_value_snapshot = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"), verbose_name="Total (R$)")
+
+    # ── Comissão apurada no fechamento da venda ───────────────────────────────
+    # Gravada pelo motor de margem (sales.margin) quando o orçamento vira venda.
+    # Os relatórios apenas SOMAM estes campos — não recalculam — para não
+    # divergirem do simulador, que é a regra vista pelo vendedor na hora da venda.
+    commission_pct = models.DecimalField(
+        max_digits=5, decimal_places=2, null=True, blank=True,
+        verbose_name="Comissão (%)",
+    )
+    commission_value = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True,
+        verbose_name="Comissão (R$)",
+    )
+    commission_calculated_at = models.DateTimeField(
+        null=True, blank=True, verbose_name="Comissão apurada em",
+    )
+    commission_source = models.CharField(
+        max_length=10,
+        choices=CommissionSource.choices,
+        blank=True,
+        default="",
+        verbose_name="Origem da comissão",
+    )
 
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Criado em")
 
