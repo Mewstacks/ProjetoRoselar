@@ -168,6 +168,9 @@
               <li class="nav-item"><a class="nav-link active" href="{% url 'core:index' %}"><i class="fa-solid fa-house"></i>Início</a></li>
               <li class="nav-item"><a class="nav-link" href="{% url 'calendar_app:calendar' %}"><i class="fa-solid fa-calendar-days"></i>Calendário</a></li>
               <li class="nav-item"><a class="nav-link" href="{% url 'sales:quotes_hub' %}"><i class="fa-solid fa-file-invoice"></i>Orçamentos</a></li>
+              {% if user.is_superuser or user.role == 'ADMIN' or user.role == 'FINANCE' %}
+              <li class="nav-item"><a class="nav-link" href="{% url 'sales:order_list' %}"><i class="fa-solid fa-boxes-stacked"></i>Pedidos</a></li>
+              {% endif %}
               <li class="nav-item"><a class="nav-link" href="{% url 'sales:standalone_simulation' %}"><i class="fa-solid fa-calculator"></i>Simulador</a></li>
               {% if user.is_authenticated %}
 				<li class="nav-item dropdown">

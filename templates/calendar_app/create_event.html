@@ -107,6 +107,9 @@
             <ul class="navbar-nav ms-auto">
               <li class="nav-item"><a class="nav-link" href="{% url 'core:index' %}">Início</a></li>
               <li class="nav-item"><a class="nav-link" href="{% url 'sales:quotes_hub' %}">Orçamentos</a></li>
+              {% if user.is_superuser or user.role == 'ADMIN' or user.role == 'FINANCE' %}
+              <li class="nav-item"><a class="nav-link" href="{% url 'sales:order_list' %}">Pedidos</a></li>
+              {% endif %}
               <li class="nav-item"><a class="nav-link active" href="{% url 'calendar_app:calendar' %}">Calendário</a></li>
               <li class="nav-item">
                 <button id="dropdownUserButton" data-dropdown-toggle="dropdownUser" class="btn btn-light text-black d-flex align-items-center" type="button">

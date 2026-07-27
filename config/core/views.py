@@ -1092,7 +1092,8 @@ def report_commissions(request):
         .filter(quote__in=qs)
         .prefetch_related("users")
     ):
-        users = list(sp.users.all())
+        # Financeiro não recebe comissão: fica fora da divisão.
+        users = [u for u in sp.users.all() if u.role != Role.FINANCE]
         if users:
             split_map[sp.quote_id] = [(u.pk, u.get_full_name() or u.username) for u in users]
 
@@ -1109,6 +1110,7 @@ def report_commissions(request):
     sales_count = 0          # vendas reais no período (não é a soma da coluna)
     pending_count = 0        # vendas sem comissão apurada
     estimated_count = 0      # comissão estimada retroativamente (BACKFILL)
+    finance_count = 0        # vendas cujo responsável é do financeiro
     total_commission = Decimal("0")
     total_sold_period = Decimal("0")
 
@@ -1122,6 +1124,22 @@ def report_commissions(request):
             # sinalizada na tela em vez de virar zero silenciosamente.
             pending_count += 1
             continue
+
+        recipients = split_map.get(q.pk)
+        if recipients is None:
+            # Sem divisão cadastrada: a comissão é do vendedor do orçamento —
+            # a menos que ele seja do financeiro, que não recebe comissão.
+            if q.seller.role == Role.FINANCE:
+                recipients = []
+            else:
+                recipients = [(q.seller_id, q.seller.get_full_name() or q.seller.username)]
+
+        if not recipients:
+            # Venda inteiramente sob responsabilidade do financeiro. Sai das
+            # linhas E do total, senão a soma da coluna não bateria com o topo.
+            finance_count += 1
+            continue
+
         if q.commission_source == CommissionSource.BACKFILL:
             estimated_count += 1
 
@@ -1129,9 +1147,6 @@ def report_commissions(request):
         total_commission += commission
         discount = q.discount_percent or Decimal("0")
 
-        recipients = split_map.get(q.pk) or [
-            (q.seller_id, q.seller.get_full_name() or q.seller.username)
-        ]
         shares = Decimal(len(recipients))
         for uid, uname in recipients:
             bucket = seller_totals[uid]
@@ -1162,6 +1177,7 @@ def report_commissions(request):
         "sales_count": sales_count,
         "pending_count": pending_count,
         "estimated_count": estimated_count,
+        "finance_count": finance_count,
         "total_commission": total_commission.quantize(Decimal("0.01")),
         "total_sold_period": total_sold_period.quantize(Decimal("0.01")),
         "date_from": date_from.isoformat(),

@@ -222,6 +222,60 @@ class CommissionReportTests(ReportTestBase):
         self.assertEqual(resp.context["estimated_count"], 1)
 
 
+class FinanceExclusionTests(ReportTestBase):
+    """Financeiro não recebe comissão, então não pode aparecer no relatório."""
+
+    def setUp(self):
+        super().setUp()
+        self._tariff(PaymentMethodType.PIX, 1, "0.00")
+        self.finance = User.objects.create_user(
+            username="financeiro", password="x", role="FINANCE",
+        )
+
+    def _sold(self, number, seller):
+        quote = self._sale(
+            number, items=[("Mesa", 1, "1000.00")], seller=seller,
+            payment_type=PaymentMethodType.PIX, payment_installments=1,
+        )
+        persist_quote_commission(quote)
+        return quote
+
+    def test_finance_seller_never_appears_as_a_row(self):
+        self._sold("V-FIN", self.finance)
+        self._sold("V-VEND", self.seller)
+
+        resp = self.client.get(reverse("core:report_commissions"), self._period_qs())
+        sellers = [r["seller"] for r in resp.context["commissions"]]
+
+        self.assertNotIn("financeiro", sellers)
+        self.assertEqual(len(sellers), 1)
+        self.assertEqual(resp.context["finance_count"], 1)
+
+    def test_finance_commission_stays_out_of_the_total(self):
+        """Se somasse no topo mas não nas linhas, a tela não fecharia."""
+        self._sold("V-FIN", self.finance)
+        vend = self._sold("V-VEND", self.seller)
+
+        resp = self.client.get(reverse("core:report_commissions"), self._period_qs())
+        rows = resp.context["commissions"]
+
+        self.assertEqual(resp.context["total_commission"], vend.commission_value)
+        self.assertEqual(sum(r["est_commission"] for r in rows), vend.commission_value)
+        self.assertEqual(resp.context["sales_count"], 2)
+
+    def test_finance_removed_from_a_split_without_losing_the_rest(self):
+        quote = self._sold("V-SPLIT", self.seller)
+        split = QuoteCommissionSplit.objects.create(quote=quote)
+        split.users.set([self.seller, self.finance])
+
+        resp = self.client.get(reverse("core:report_commissions"), self._period_qs())
+        rows = resp.context["commissions"]
+
+        self.assertEqual([r["seller"] for r in rows], ["vendedor"])
+        # Sem o financeiro na divisão, o vendedor fica com a comissão inteira.
+        self.assertEqual(rows[0]["est_commission"], quote.commission_value)
+
+
 class DiscountReportTests(ReportTestBase):
     def test_canceled_quote_does_not_pollute_average(self):
         self._sale("V-1", items=[("Mesa", 1, "1000.00")], discount_percent=Decimal("10.0"))

@@ -21,6 +21,10 @@
         <div class="collapse navbar-collapse" id="navbarSupportedContent">
           <ul class="navbar-nav ms-auto align-items-center">
             <li class="nav-item"><a class="nav-link" href="{% url 'core:dashboard' %}">Dashboard</a></li>
+            <li class="nav-item"><a class="nav-link" href="{% url 'sales:quotes_hub' %}">Orçamentos</a></li>
+            {% if user.is_superuser or user.role == 'ADMIN' or user.role == 'FINANCE' %}
+            <li class="nav-item"><a class="nav-link" href="{% url 'sales:order_list' %}">Pedidos</a></li>
+            {% endif %}
             <li class="nav-item"><a class="nav-link active" href="{% url 'core:reports_hub' %}">Relatórios</a></li>
             <li class="nav-item ms-2"><button id="dropdownUserButton" data-dropdown-toggle="dropdownUser" class="btn btn-light text-black" type="button"><span>{{ user.username }}</span></button><div id="dropdownUser" class="z-10 hidden bg-white rounded-lg shadow w-44"><div class="py-2"><a href="{% url 'accounts:logout' %}" class="block px-4 py-2 text-sm text-red-700">Sair</a></div></div></li>
           </ul>

@@ -232,6 +232,61 @@ class OrderDateSyncTests(TestCase):
         self.assertEqual(timezone.localtime(sibling.created_at).date(), date(2026, 6, 24))
 
 
+class OrdersNavTabTests(TestCase):
+    """Aba 'Pedidos' na navbar: só financeiro e admin enxergam."""
+
+    def setUp(self):
+        self.seller = User.objects.create_user(username="v", password="x", role="SELLER")
+        self.finance = User.objects.create_user(username="f", password="x", role="FINANCE")
+        self.admin = User.objects.create_user(username="a", password="x", role="ADMIN")
+        self.superuser = User.objects.create_user(
+            username="root", password="x", role="SELLER", is_superuser=True,
+        )
+
+    def _nav_has_orders_tab(self, username):
+        self.client.login(username=username, password="x")
+        html = self.client.get(reverse("core:index")).content.decode()
+        nav = html.split("</nav>")[0]
+        return ">Pedidos</a>" in nav
+
+    def test_finance_and_admin_see_the_tab(self):
+        self.assertTrue(self._nav_has_orders_tab("f"))
+        self.assertTrue(self._nav_has_orders_tab("a"))
+
+    def test_superuser_sees_the_tab(self):
+        """O admin do sistema tem role SELLER: sem is_superuser a aba sumiria."""
+        self.assertTrue(self._nav_has_orders_tab("root"))
+
+    def test_seller_does_not_see_the_tab(self):
+        self.assertFalse(self._nav_has_orders_tab("v"))
+
+    def test_order_list_only_shows_own_orders_to_a_seller(self):
+        from core.models import Customer
+
+        customer = Customer.objects.create(name="Cliente")
+        other = User.objects.create_user(username="v2", password="x", role="SELLER")
+        mine = Quote.objects.create(
+            number="ORC-M", customer=customer, seller=self.seller,
+            status=QuoteStatus.CONVERTED,
+        )
+        theirs = Quote.objects.create(
+            number="ORC-T", customer=customer, seller=other,
+            status=QuoteStatus.CONVERTED,
+        )
+        Order.objects.create(number="ORC-M", quote=mine, is_total_conference=True)
+        Order.objects.create(number="ORC-T", quote=theirs, is_total_conference=True)
+
+        self.client.login(username="v", password="x")
+        html = self.client.get(reverse("sales:order_list")).content.decode()
+        self.assertIn("ORC-M", html)
+        self.assertNotIn("ORC-T", html)
+
+        self.client.login(username="f", password="x")
+        html = self.client.get(reverse("sales:order_list")).content.decode()
+        self.assertIn("ORC-M", html)
+        self.assertIn("ORC-T", html)
+
+
 class SimulationTariffTests(TestCase):
     """Simulador não pode liberar parcela cujo custo do banco é desconhecido."""
 
