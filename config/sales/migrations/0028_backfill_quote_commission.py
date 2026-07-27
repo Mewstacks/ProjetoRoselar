@@ -56,8 +56,12 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ("sales", "0027_quote_commission_calculated_at_quote_commission_pct_and_more"),
-        # PaymentTariff é lido pelo motor para obter as taxas.
-        ("core", "0001_initial"),
+        # O motor lê PaymentTariff para obter as taxas. Precisa ser a ÚLTIMA
+        # migração de tarifas, não a inicial: core.0021 reescreve as taxas do
+        # cartão (1x→4%, 2x→3,5%, 3-6x→3%) e ainda está pendente em produção.
+        # Com a dependência em 0001_initial o Django poderia rodar este backfill
+        # antes dela e apurar a comissão histórica com a tabela antiga.
+        ("core", "0021_credit_card_tiered_tariffs"),
     ]
 
     operations = [
