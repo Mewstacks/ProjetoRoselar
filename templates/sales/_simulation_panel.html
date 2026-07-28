@@ -31,27 +31,35 @@
                 Desconto
               </div>
               <div class="s-body">
+                {% if quote.dual_pricing and pricing_tier == 'WHOLESALE' %}
+                  <div class="sim-msg" style="background:#f1f3f5;color:var(--brand);margin-bottom:.65rem;">
+                    <i class="fa-solid fa-circle-info"></i>
+                    <div>Simulação em <strong>Atacado</strong>: o desconto pertence somente ao varejo e fica desativado aqui.</div>
+                  </div>
+                {% endif %}
                 <div class="slider-box">
                   <div class="slider-row">
                     <span class="s-min">0%</span>
                     <div class="pct-control" aria-label="Controle de desconto em porcentagem">
-                      <button type="button" class="pct-btn" onclick="adjustPercent('discount', -0.5); scheduleSubmit()" aria-label="Reduzir desconto">-</button>
+                      <button type="button" class="pct-btn" onclick="adjustPercent('discount', -0.5); scheduleSubmit()" aria-label="Reduzir desconto" {% if quote.dual_pricing and pricing_tier == 'WHOLESALE' %}disabled{% endif %}>-</button>
                       <input type="text" id="discount-input"
                              value="{{ discount_percent|floatformat:1 }}"
                              class="pct-input"
                              inputmode="decimal"
                              aria-label="Desconto em porcentagem"
                              oninput="onDiscountInputEdit(this)"
-                             onblur="onDiscountInputBlur(this)">
+                             onblur="onDiscountInputBlur(this)"
+                             {% if quote.dual_pricing and pricing_tier == 'WHOLESALE' %}disabled{% endif %}>
                       <span class="pct-suffix">%</span>
-                      <button type="button" class="pct-btn" onclick="adjustPercent('discount', 0.5); scheduleSubmit()" aria-label="Aumentar desconto">+</button>
+                      <button type="button" class="pct-btn" onclick="adjustPercent('discount', 0.5); scheduleSubmit()" aria-label="Aumentar desconto" {% if quote.dual_pricing and pricing_tier == 'WHOLESALE' %}disabled{% endif %}>+</button>
                     </div>
                     <span class="s-max" id="lbl-max-discount">{{ max_discount_allowed|floatformat:0 }}%</span>
                   </div>
                   <input type="range" class="sl-disc" id="discount-slider"
                          min="0" max="{{ max_discount_allowed|floatformat:1 }}" step="0.1"
                          value="{{ discount_percent }}"
-                         oninput="onDiscountChange(this.value); scheduleSubmit()">
+                         oninput="onDiscountChange(this.value); scheduleSubmit()"
+                         {% if quote.dual_pricing and pricing_tier == 'WHOLESALE' %}disabled{% endif %}>
                 </div>
                 {% if controls_blocked and subtotal %}
                 <div class="sim-msg bad">
@@ -537,7 +545,7 @@
                 <div class="hi brand mt-3">
                   <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
                     <div>
-                      <div class="hi-l">Total para o Cliente</div>
+                      <div class="hi-l">Total para o Cliente{% if quote.dual_pricing %} — {{ pricing_tier_label }}{% endif %}</div>
                       <div class="hi-v">R$ {{ final_total|floatformat:2 }}</div>
                     </div>
                     {% if not split_mode %}
@@ -561,6 +569,37 @@
                     {% endif %}
                   </div>
                 </div>
+
+                {% if quote.dual_pricing and alternate_payment_plan %}
+                  <div class="hi muted mt-2">
+                    <div class="d-flex justify-content-between align-items-start gap-2">
+                      <div>
+                        <div class="hi-l">Opção {{ alternate_payment_plan.tier_label }}{% if alternate_payment_plan.tier == 'WHOLESALE' %} — sem desconto{% endif %}</div>
+                        <div class="hi-v">R$ {{ alternate_payment_plan.total|floatformat:2 }}</div>
+                      </div>
+                      <div style="text-align:right;">
+                        {% if alternate_payment_plan.down_payment > 0 %}
+                          <div style="font-size:.72rem;opacity:.85;">Entrada: R$ {{ alternate_payment_plan.down_payment|floatformat:2 }}</div>
+                        {% endif %}
+                        {% for leg in alternate_payment_plan.legs %}
+                          {% if leg.amount > 0 %}
+                            <div style="font-size:.78rem;font-weight:700;margin-top:.12rem;">
+                              {% if alternate_payment_plan.split_active %}{{ leg.role }}: {% endif %}
+                              {% if leg.installments > 1 %}
+                                {{ leg.installments }}x de R$ {{ leg.installment_value|floatformat:2 }}
+                              {% else %}
+                                {{ leg.description }} — R$ {{ leg.amount|floatformat:2 }}
+                              {% endif %}
+                            </div>
+                          {% endif %}
+                        {% endfor %}
+                      </div>
+                    </div>
+                  </div>
+                  <div style="font-size:.72rem;color:var(--muted);margin:.35rem .2rem 0;">
+                    O desconto altera somente o varejo; a quantidade de parcelas é projetada separadamente sobre cada total.
+                  </div>
+                {% endif %}
 
                 {% if split_mode %}
                 <!-- Breakdown Entrada Financiada -->
@@ -935,7 +974,7 @@ function toggleSplitMode() {
   scheduleSubmit();
 }
 
-var _AVISTA_TYPES_JS = ['CASH', 'PIX', 'BOLETO'];
+var _AVISTA_TYPES_JS = ['CASH', 'PIX', 'BOLETO', 'BOLETO_30'];
 function _isBothCards() {
   var pt1 = document.getElementById('sel-ptype').value;
   var pt2 = document.getElementById('sel-ptype2').value;
@@ -1245,7 +1284,7 @@ function clearDpValue() {
 function updateDpCalcVisibility() {
   var pt = document.getElementById('sel-ptype').value;
   var splitOn = document.getElementById('chk-split').checked;
-  var isCard = (pt === 'CREDIT_CARD' || pt === 'BOLETO' || pt === 'CHEQUE');
+  var isCard = (pt === 'CREDIT_CARD' || pt === 'BOLETO' || pt === 'BOLETO_30' || pt === 'CHEQUE');
   var card = document.getElementById('dp-calc-card');
   if (card) card.style.display = (isCard && !splitOn) ? '' : 'none';
   // When payment type no longer supports down payment, clear it

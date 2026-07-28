@@ -369,12 +369,21 @@
         <div class="row g-3 mb-1 fi fi-2">
           <div class="col-md-4">
             <div class="hi brand">
-              <div class="hi-l">Total Geral{% if quote.dual_pricing %} — Varejo{% endif %}</div>
+              <div class="hi-l">Total Geral{% if quote.dual_pricing %} — {{ value_breakdown.selected_price_tier_label }}{% endif %}</div>
               <div class="hi-v">R$ {{ quote.total_value_snapshot|floatformat:2 }}</div>
               {% if quote.dual_pricing %}
                 <div style="font-size:.8rem;font-weight:700;margin-top:.35rem;padding-top:.35rem;border-top:1px solid rgba(255,255,255,.2);">
-                  Atacado (sem desconto): R$ {{ value_breakdown.rounded_total_wholesale|floatformat:2 }}
+                  {% if value_breakdown.selected_price_tier == 'WHOLESALE' %}
+                    Varejo: R$ {{ value_breakdown.rounded_total_retail|floatformat:2 }}
+                  {% else %}
+                    Atacado (sem desconto): R$ {{ value_breakdown.rounded_total_wholesale|floatformat:2 }}
+                  {% endif %}
                 </div>
+                {% if quote.status == 'CONVERTED' or quote.status == 'POS_VENDA' %}
+                  <div style="font-size:.72rem;margin-top:.35rem;opacity:.9;">
+                    Modalidade fechada: <strong>{{ value_breakdown.selected_price_tier_label }}</strong>
+                  </div>
+                {% endif %}
               {% endif %}
               {% if quote.payment_fee_percent > 0 %}
                 <div style="font-size:.72rem;opacity:.8;margin-top:.2rem;">
@@ -406,7 +415,7 @@
           </div>
           <div class="s-body">
             <div class="r-line">
-              <span class="r-l">Valor original (produtos)</span>
+              <span class="r-l">Valor original dos produtos{% if quote.dual_pricing %} — {{ value_breakdown.selected_price_tier_label }}{% endif %}</span>
               <span style="font-weight:700;">R$ {{ value_breakdown.subtotal|floatformat:2 }}</span>
             </div>
             {% if value_breakdown.has_markup %}
@@ -426,7 +435,7 @@
               <span style="font-weight:700;{% if value_breakdown.freight_to_store %}text-decoration:line-through;opacity:.6;{% endif %}">R$ {{ value_breakdown.freight|floatformat:2 }}</span>
             </div>
             <div class="r-line">
-              <span class="r-l">{% if quote.dual_pricing %}Varejo{% else %}Subtotal{% endif %} com desconto{% if not value_breakdown.freight_to_store %} + frete{% endif %}</span>
+              <span class="r-l">{% if quote.dual_pricing %}{{ value_breakdown.selected_price_tier_label }}{% else %}Subtotal{% endif %}{% if value_breakdown.has_discount %} com desconto{% endif %}{% if not value_breakdown.freight_to_store %} + frete{% endif %}</span>
               <span style="font-weight:700;">R$ {{ value_breakdown.total_with_discount|floatformat:2 }}</span>
             </div>
             {% if value_breakdown.has_rounding %}
@@ -507,6 +516,33 @@
                   {% endif %}
                 {% else %}
                   <div style="font-size:.86rem;color:var(--muted);">Não definida</div>
+                {% endif %}
+                {% if quote.dual_pricing %}
+                  <div style="display:grid;gap:.5rem;margin-top:.7rem;">
+                    {% for plan in value_breakdown.payment_plans %}
+                      <div style="border:1px solid var(--border);border-radius:8px;padding:.6rem .7rem;background:#f8f9fa;">
+                        <div style="display:flex;justify-content:space-between;gap:.7rem;margin-bottom:.3rem;">
+                          <strong style="color:var(--brand);">{{ plan.tier_label }}</strong>
+                          <strong>R$ {{ plan.total|floatformat:2 }}</strong>
+                        </div>
+                        {% if plan.down_payment > 0 %}
+                          <div style="font-size:.76rem;color:var(--muted);">Entrada à vista: R$ {{ plan.down_payment|floatformat:2 }}</div>
+                        {% endif %}
+                        {% for leg in plan.legs %}
+                          {% if leg.amount > 0 %}
+                            <div style="font-size:.78rem;color:var(--muted);">
+                              {% if plan.split_active %}{{ leg.role }} — {% elif plan.down_payment > 0 %}Restante — {% endif %}{{ leg.description }}:
+                              {% if leg.installments > 1 %}
+                                <strong>{{ leg.installments }}x de R$ {{ leg.installment_value|floatformat:2 }}</strong>
+                              {% else %}
+                                <strong>R$ {{ leg.amount|floatformat:2 }}</strong>
+                              {% endif %}
+                            </div>
+                          {% endif %}
+                        {% endfor %}
+                      </div>
+                    {% endfor %}
+                  </div>
                 {% endif %}
               </div>
             </div>
@@ -744,6 +780,42 @@
                             {% endif %}
                           </strong>
                         </div>
+                      {% endif %}
+
+                      {% if quote.dual_pricing %}
+                        <div style="margin-top:1rem;border:1px solid #d5d9df;border-radius:9px;padding:.75rem;">
+                          <div style="font-size:.82rem;font-weight:800;color:var(--brand);margin-bottom:.25rem;">
+                            Modalidade fechada com o cliente
+                          </div>
+                          <p style="font-size:.76rem;color:var(--muted);margin-bottom:.55rem;">
+                            Esta escolha define o faturamento e a comissão da venda.
+                          </p>
+                          <div style="display:grid;gap:.45rem;">
+                            {% for plan in value_breakdown.payment_plans %}
+                              <label style="display:flex;align-items:flex-start;gap:.55rem;padding:.55rem .65rem;border:1px solid #dee2e6;border-radius:7px;cursor:pointer;background:#fff;">
+                                <input type="radio" name="selected_price_tier" value="{{ plan.tier }}" required
+                                       {% if plan.tier == value_breakdown.selected_price_tier %}checked{% endif %}
+                                       style="accent-color:var(--brand);margin-top:3px;">
+                                <span style="flex:1;">
+                                  <span style="display:flex;justify-content:space-between;gap:.5rem;">
+                                    <strong>{{ plan.tier_label }}</strong>
+                                    <strong>R$ {{ plan.total|floatformat:2 }}</strong>
+                                  </span>
+                                  {% for leg in plan.legs %}
+                                    {% if leg.amount > 0 %}
+                                      <span style="display:block;font-size:.74rem;color:var(--muted);">
+                                        {% if plan.split_active %}{{ leg.role }}: {% endif %}
+                                        {% if leg.installments > 1 %}{{ leg.installments }}x de R$ {{ leg.installment_value|floatformat:2 }}{% else %}{{ leg.description }} — R$ {{ leg.amount|floatformat:2 }}{% endif %}
+                                      </span>
+                                    {% endif %}
+                                  {% endfor %}
+                                </span>
+                              </label>
+                            {% endfor %}
+                          </div>
+                        </div>
+                      {% else %}
+                        <input type="hidden" name="selected_price_tier" value="RETAIL">
                       {% endif %}
 
                       <!-- Seleção de itens para pedido de compra -->

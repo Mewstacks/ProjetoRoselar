@@ -45,6 +45,11 @@ class QuoteStatus(models.TextChoices):
     CANCELED = "CANCELED", "Cancelado"
 
 
+class PriceTier(models.TextChoices):
+    RETAIL = "RETAIL", "Varejo"
+    WHOLESALE = "WHOLESALE", "Atacado"
+
+
 # Status que contam como venda em métricas e relatórios. Um orçamento
 # convertido continua sendo venda depois que o pedido é concluído e ele
 # avança para Pós-Venda — sem isso, a venda "sumiria" dos painéis.
@@ -73,6 +78,81 @@ ROUNDING_STEPS = {
     RoundingMode.R50: Decimal("50"),
     RoundingMode.R100: Decimal("100"),
 }
+
+
+def build_payment_plan(
+    *,
+    total: Decimal,
+    tier: str,
+    payment_type: str = "",
+    installments: int = 1,
+    payment_type_2: str = "",
+    installments_2: int = 1,
+    split_amount: Decimal | None = None,
+    down_payment: Decimal | None = None,
+) -> dict:
+    """Monta uma projeção de pagamento para um total de varejo ou atacado.
+
+    A mesma função alimenta PDF, detalhe e simulador, impedindo que cada tela
+    calcule parcelas de uma base diferente. Taxas bancárias são custo da loja e
+    não alteram o total nem as parcelas apresentadas ao cliente.
+    """
+    from core.models import PaymentMethodType, payment_condition_label, payment_description
+
+    total = max(Decimal("0"), Decimal(str(total or 0)))
+    n1 = max(1, int(installments or 1))
+    n2 = max(1, int(installments_2 or 1))
+    labels = dict(PaymentMethodType.choices)
+
+    def _leg(method: str, count: int, amount: Decimal, role: str) -> dict:
+        method_label = labels.get(method, method or "")
+        condition = payment_condition_label(method, count)
+        description = payment_description(method, count).replace(" - ", " — ")
+        return {
+            "role": role,
+            "method": method,
+            "method_label": method_label,
+            "installments": count,
+            "amount": amount,
+            "installment_value": amount / Decimal(count),
+            "description": description,
+        }
+
+    split_active = bool(payment_type_2) and split_amount is not None
+    if split_active:
+        first_amount = min(
+            max(Decimal("0"), Decimal(str(split_amount or 0))),
+            total,
+        )
+        second_amount = total - first_amount
+        effective_down_payment = Decimal("0")
+        legs = [
+            _leg(payment_type, n1, first_amount, "Entrada"),
+            _leg(payment_type_2, n2, second_amount, "Restante"),
+        ]
+    else:
+        effective_down_payment = min(
+            max(Decimal("0"), Decimal(str(down_payment or 0))),
+            total,
+        )
+        financed = total - effective_down_payment
+        first_amount = financed
+        second_amount = Decimal("0")
+        legs = [_leg(payment_type, n1, financed, "Pagamento")]
+
+    return {
+        "tier": tier,
+        "tier_label": PriceTier(tier).label,
+        "total": total,
+        "split_active": split_active,
+        "down_payment": effective_down_payment,
+        "financed": total - effective_down_payment,
+        "first_amount": first_amount,
+        "second_amount": second_amount,
+        "legs": legs,
+        "primary": legs[0],
+        "secondary": legs[1] if len(legs) > 1 else None,
+    }
 
 
 class CommissionSource(models.TextChoices):
@@ -295,6 +375,13 @@ class Quote(models.Model):
         verbose_name="Orçamento Atacado + Varejo",
         help_text="Mostra preços de varejo e atacado lado a lado.",
     )
+    selected_price_tier = models.CharField(
+        max_length=10,
+        choices=PriceTier.choices,
+        default=PriceTier.RETAIL,
+        verbose_name="Modalidade Fechada",
+        help_text="Preço efetivamente escolhido pelo cliente na conversão da venda.",
+    )
 
     # observações gerais do orçamento
     notes = models.TextField(blank=True, verbose_name="Observações")
@@ -357,18 +444,18 @@ class Quote(models.Model):
     
     def get_payment_description(self) -> str:
         """Retorna descrição formatada do pagamento."""
-        from core.models import PaymentMethodType
+        from core.models import payment_description
 
         if not self.payment_type:
             return "Não definido"
 
-        names = dict(PaymentMethodType.choices)
-        t1 = names.get(self.payment_type, self.payment_type)
-        desc1 = f"{t1} - À vista" if self.payment_installments == 1 else f"{t1} - {self.payment_installments}x"
+        desc1 = payment_description(self.payment_type, self.payment_installments)
 
         if self.payment_type_2 and self.payment_split_amount is not None:
-            t2 = names.get(self.payment_type_2, self.payment_type_2)
-            desc2 = f"{t2} - À vista" if self.payment_installments_2 == 1 else f"{t2} - {self.payment_installments_2}x"
+            desc2 = payment_description(
+                self.payment_type_2,
+                self.payment_installments_2,
+            )
             return f"{desc1} + {desc2}"
 
         return desc1
@@ -418,9 +505,10 @@ class Quote(models.Model):
         )
         return adj_subtotal + self.billable_freight
     
-    def calculate_payment_fee_value(self) -> Decimal:
-        """Calcula o valor da taxa de pagamento (suporta pagamento dividido)."""
-        base_total = self.calculate_total_with_freight_and_discount()
+    def calculate_payment_fee_value(self, base_total: Decimal | None = None) -> Decimal:
+        """Calcula o custo bancário da modalidade efetivamente selecionada."""
+        if base_total is None:
+            base_total = self.calculate_total_for_tier()
         if self.payment_type_2 and self.payment_split_amount is not None:
             split_1 = min(self.payment_split_amount, base_total)
             split_2 = max(Decimal("0"), base_total - split_1)
@@ -432,8 +520,8 @@ class Quote(models.Model):
     
     def calculate_final_total(self) -> Decimal:
         """Calcula o total final incluindo taxa de pagamento."""
-        base_total = self.calculate_total_with_freight_and_discount()
-        fee_value = self.calculate_payment_fee_value()
+        base_total = self.calculate_total_for_tier()
+        fee_value = self.calculate_payment_fee_value(base_total)
         return base_total + fee_value
 
     def apply_client_rounding(self, base: Decimal, use_override: bool = True) -> Decimal:
@@ -465,7 +553,10 @@ class Quote(models.Model):
         base = self.calculate_total_with_freight_and_discount()
         return self.apply_client_rounding(base)
 
-    def calculate_rounded_total_wholesale(self) -> Decimal:
+    def calculate_rounded_total_wholesale(
+        self,
+        markup_pct: Decimal | None = None,
+    ) -> Decimal:
         """Total de venda ao cliente no preço de atacado.
 
         O desconto comercial do orçamento incide exclusivamente sobre o
@@ -475,12 +566,54 @@ class Quote(models.Model):
         somente ao total de varejo.
         """
         subtotal = self.calculate_subtotal_wholesale()
-        markup_pct = self.price_increase_percent or Decimal("0.0")
+        if markup_pct is None:
+            markup_pct = self.price_increase_percent or Decimal("0.0")
         base = (
             subtotal * (Decimal("1") + markup_pct / Decimal("100"))
             + self.billable_freight
         )
         return self.apply_client_rounding(base, use_override=False)
+
+    def calculate_subtotal_for_tier(self, tier: str | None = None) -> Decimal:
+        """Subtotal de produtos da modalidade informada ou efetivamente fechada."""
+        tier = tier or self.selected_price_tier
+        if self.dual_pricing and tier == PriceTier.WHOLESALE:
+            return self.calculate_subtotal_wholesale()
+        return self.calculate_subtotal()
+
+    def calculate_total_for_tier(self, tier: str | None = None) -> Decimal:
+        """Total final da modalidade informada ou efetivamente fechada."""
+        tier = tier or self.selected_price_tier
+        if self.dual_pricing and tier == PriceTier.WHOLESALE:
+            return self.calculate_rounded_total_wholesale()
+        return self.calculate_rounded_total()
+
+    def get_payment_plans(self) -> list[dict]:
+        """Opções de pagamento persistidas, uma por modalidade oferecida."""
+        common = {
+            "payment_type": self.payment_type or "",
+            "installments": self.payment_installments or 1,
+            "payment_type_2": self.payment_type_2 or "",
+            "installments_2": self.payment_installments_2 or 1,
+            "split_amount": self.payment_split_amount,
+            "down_payment": self.down_payment_value,
+        }
+        plans = [
+            build_payment_plan(
+                total=self.calculate_rounded_total(),
+                tier=PriceTier.RETAIL,
+                **common,
+            )
+        ]
+        if self.dual_pricing:
+            plans.append(
+                build_payment_plan(
+                    total=self.calculate_rounded_total_wholesale(),
+                    tier=PriceTier.WHOLESALE,
+                    **common,
+                )
+            )
+        return plans
 
 
 
@@ -768,7 +901,7 @@ def _refresh_quote_snapshot(quote_id: int) -> None:
     try:
         quote = Quote.objects.prefetch_related('items').get(pk=quote_id)
         Quote.objects.filter(pk=quote_id).update(
-            total_value_snapshot=quote.calculate_rounded_total()
+            total_value_snapshot=quote.calculate_total_for_tier()
         )
     except Quote.DoesNotExist:
         pass

@@ -2,7 +2,15 @@ from django import forms
 from django.forms import inlineformset_factory
 from django.utils import timezone
 
-from .models import Quote, QuoteItem, QuoteItemImage, Order, OrderItem, SOLD_STATUSES
+from .models import (
+    Order,
+    OrderItem,
+    PriceTier,
+    Quote,
+    QuoteItem,
+    QuoteItemImage,
+    SOLD_STATUSES,
+)
 from core.models import PaymentMethodType
 
 
@@ -68,6 +76,7 @@ class QuoteForm(forms.ModelForm):
             "payment_fee_percent",
             "total_override",
             "dual_pricing",
+            "selected_price_tier",
             "notes",
         ]
         widgets = {
@@ -79,6 +88,7 @@ class QuoteForm(forms.ModelForm):
             "payment_installments": forms.Select(attrs={"class": "form-control"}),
             "payment_fee_percent": forms.HiddenInput(),
             "dual_pricing": forms.CheckboxInput(attrs={"class": "form-check-input"}),
+            "selected_price_tier": forms.Select(attrs={"class": "form-control"}),
             "notes": forms.Textarea(attrs={"class": "form-control", "rows": 2, "placeholder": "Observações gerais do orçamento..."}),
         }
 
@@ -93,6 +103,7 @@ class QuoteForm(forms.ModelForm):
         self.fields['payment_fee_percent'].required = False
         self.fields['total_override'].required = False
         self.fields['dual_pricing'].required = False
+        self.fields['selected_price_tier'].required = False
         self.fields['notes'].required = False
 
         # Datas editáveis: quote_date sempre; sale_date só existe após a venda.
@@ -129,6 +140,12 @@ class QuoteForm(forms.ModelForm):
 
         if cleaned.get('has_architect') and not cleaned.get('architect'):
             self.add_error('architect', 'Selecione o arquiteto.')
+
+        if (
+            not cleaned.get("dual_pricing")
+            or cleaned.get("selected_price_tier") not in PriceTier.values
+        ):
+            cleaned["selected_price_tier"] = PriceTier.RETAIL
 
         # Datas em branco não apagam o valor existente (evita venda "sumir"
         # dos painéis por submit sem a data preenchida).

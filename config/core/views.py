@@ -29,7 +29,7 @@ from .models import (
     QuoteTemplate, QuoteTemplateItem,
 )
 from sales.models import (
-    Quote, QuoteStatus, SOLD_STATUSES, Order, OrderStatus,
+    Quote, QuoteStatus, PriceTier, SOLD_STATUSES, Order, OrderStatus,
     QuoteCommissionSplit, CommissionSource,
 )
 from accounts.models import User, Role
@@ -983,7 +983,12 @@ def _product_revenue(date_from, date_to, limit: int = 50) -> list[dict]:
     )
 
     for quote in quotes:
-        subtotal = quote.calculate_subtotal()
+        selected_tier = (
+            quote.selected_price_tier
+            if quote.dual_pricing
+            else PriceTier.RETAIL
+        )
+        subtotal = quote.calculate_subtotal_for_tier(selected_tier)
         if subtotal <= 0:
             continue
         # total_value_snapshot já embute desconto, acréscimo, arredondamento e
@@ -1001,7 +1006,12 @@ def _product_revenue(date_from, date_to, limit: int = 50) -> list[dict]:
                 {"qty": 0, "total_value": Decimal("0"), "names": defaultdict(int)},
             )
             bucket["qty"] += item.quantity
-            bucket["total_value"] += item.line_total * factor
+            line_total = (
+                item.line_total_wholesale
+                if selected_tier == PriceTier.WHOLESALE
+                else item.line_total
+            )
+            bucket["total_value"] += line_total * factor
             bucket["names"][raw_name] += 1
 
     rows = [
@@ -1099,7 +1109,10 @@ def report_commissions(request):
     ):
         users = list(sp.users.all())
         if users:
-            split_map[sp.quote_id] = [(u.pk, u.get_full_name() or u.username) for u in users]
+            split_map[sp.quote_id] = [
+                (u.pk, u.get_full_name() or u.username, u.role)
+                for u in users
+            ]
 
     seller_totals = defaultdict(
         lambda: {

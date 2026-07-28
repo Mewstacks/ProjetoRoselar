@@ -24,6 +24,7 @@ def backfill_commissions(apps, schema_editor):
 
     sold = (
         Quote.objects.filter(status__in=SOLD_STATUSES, commission_value__isnull=True)
+        .defer("selected_price_tier")
         .prefetch_related("items")
     )
 

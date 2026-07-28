@@ -19,6 +19,9 @@ class PaymentTariffFeeTests(TestCase):
         PaymentTariff.objects.create(
             payment_type="CHEQUE", installments=1, fee_percent=Decimal("0.00")
         )
+        PaymentTariff.objects.create(
+            payment_type="BOLETO", installments=1, fee_percent=Decimal("0.00")
+        )
 
     def test_fee_cadastrada(self):
         self.assertEqual(
@@ -37,5 +40,12 @@ class PaymentTariffFeeTests(TestCase):
 
     def test_lookup_type(self):
         self.assertEqual(PaymentTariff.lookup_type("CHEQUE"), "CREDIT_CARD")
+        self.assertEqual(PaymentTariff.lookup_type("BOLETO_30"), "BOLETO")
         self.assertEqual(PaymentTariff.lookup_type("CREDIT_CARD"), "CREDIT_CARD")
         self.assertEqual(PaymentTariff.lookup_type("PIX"), "PIX")
+
+    def test_boleto_30_dias_usa_tarifa_de_uma_cobranca(self):
+        self.assertEqual(
+            PaymentTariff.get_fee("BOLETO_30", 1),
+            Decimal("0.00"),
+        )

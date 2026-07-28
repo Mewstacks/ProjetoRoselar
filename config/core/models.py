@@ -138,6 +138,24 @@ class PaymentMethodType(models.TextChoices):
     CREDIT_CARD = "CREDIT_CARD", "Cartão de Crédito"
     CHEQUE = "CHEQUE", "Cheque"
     BOLETO = "BOLETO", "Boleto"
+    BOLETO_30 = "BOLETO_30", "Boleto para 30 dias"
+
+
+def payment_condition_label(payment_type: str, installments: int = 1) -> str:
+    """Descreve o prazo sem confundir boleto futuro com pagamento à vista."""
+    if payment_type == PaymentMethodType.BOLETO_30:
+        return "30 dias"
+    installments = max(1, int(installments or 1))
+    return "À vista" if installments == 1 else f"{installments}x"
+
+
+def payment_description(payment_type: str, installments: int = 1) -> str:
+    """Retorna a condição completa apresentada ao cliente e nos relatórios."""
+    label = dict(PaymentMethodType.choices).get(payment_type, payment_type or "")
+    if payment_type == PaymentMethodType.BOLETO_30:
+        return label
+    condition = payment_condition_label(payment_type, installments)
+    return f"{label} - {condition}" if label else condition
 
 
 class PaymentTariff(models.Model):
@@ -178,7 +196,12 @@ class PaymentTariff(models.Model):
         return f"{type_display} - {self.installments}x ({self.fee_percent}%)"
     
     # CHEQUE não tem tabela própria: usa a do cartão como referência.
-    TARIFF_LOOKUP_OVERRIDES = {"CHEQUE": "CREDIT_CARD"}
+    # O boleto para 30 dias é uma condição comercial, não uma nova tarifa:
+    # usa o custo cadastrado para uma cobrança de boleto.
+    TARIFF_LOOKUP_OVERRIDES = {
+        "CHEQUE": "CREDIT_CARD",
+        "BOLETO_30": "BOLETO",
+    }
 
     @classmethod
     def lookup_type(cls, payment_type):

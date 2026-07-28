@@ -8,7 +8,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.models import Supplier
-from sales.models import Order, OrderStatus, Quote, QuoteStatus
+from sales.models import Order, OrderStatus, PriceTier, Quote, QuoteStatus
 
 User = get_user_model()
 
@@ -299,6 +299,11 @@ class SimulationTariffTests(TestCase):
             PaymentTariff.objects.create(
                 payment_type="CREDIT_CARD", installments=inst, fee_percent=Decimal(fee)
             )
+        PaymentTariff.objects.create(
+            payment_type="BOLETO",
+            installments=1,
+            fee_percent=Decimal("0.00"),
+        )
 
     def _sim(self, payment_type, installments):
         from sales.views import _build_simulation_context
@@ -337,6 +342,20 @@ class SimulationTariffTests(TestCase):
             for o in json.loads(ctx["tariffs_by_type_json"])["CREDIT_CARD"]
         ]
         self.assertEqual(oferecidas, [1, 6, 12])
+
+    def test_boleto_30_dias_aparece_com_prazo_correto(self):
+        import json
+
+        ctx = self._sim("BOLETO_30", 1)
+        opcoes = json.loads(ctx["tariffs_by_type_json"])["BOLETO_30"]
+
+        self.assertEqual(ctx["sim_payment_description"], "Boleto para 30 dias")
+        self.assertEqual(ctx["payment_fee_percent"], Decimal("0.00"))
+        self.assertEqual(
+            opcoes,
+            [{"installments": 1, "fee": 0.0, "label": "30 dias"}],
+        )
+        self.assertFalse(ctx["controls_blocked"])
 
 
 class SimulationSuggestionTests(TestCase):
@@ -585,6 +604,81 @@ class DualPricingTests(TestCase):
             Decimal("1900.000"),
         )
 
+    def test_each_price_tier_has_its_own_installment_value(self):
+        self.quote.discount_percent = Decimal("10.0")
+        self.quote.payment_type = "CREDIT_CARD"
+        self.quote.payment_installments = 10
+        self.quote.save(update_fields=[
+            "discount_percent",
+            "payment_type",
+            "payment_installments",
+        ])
+
+        retail, wholesale = self.quote.get_payment_plans()
+        self.assertEqual(retail["total"], Decimal("2070.000"))
+        self.assertEqual(retail["primary"]["installment_value"], Decimal("207.000"))
+        self.assertEqual(wholesale["total"], Decimal("1900.000"))
+        self.assertEqual(
+            wholesale["primary"]["installment_value"],
+            Decimal("190.000"),
+        )
+
+    def test_split_payment_is_recalculated_for_both_totals(self):
+        self.quote.discount_percent = Decimal("10.0")
+        self.quote.payment_type = "PIX"
+        self.quote.payment_installments = 1
+        self.quote.payment_type_2 = "CREDIT_CARD"
+        self.quote.payment_installments_2 = 7
+        self.quote.payment_split_amount = Decimal("500.00")
+        self.quote.save()
+
+        retail, wholesale = self.quote.get_payment_plans()
+        self.assertEqual(retail["primary"]["amount"], Decimal("500.00"))
+        self.assertEqual(retail["secondary"]["amount"], Decimal("1570.000"))
+        self.assertEqual(wholesale["primary"]["amount"], Decimal("500.00"))
+        self.assertEqual(wholesale["secondary"]["amount"], Decimal("1400.000"))
+        self.assertEqual(
+            wholesale["secondary"]["installment_value"],
+            Decimal("200.000"),
+        )
+
+    def test_entry_plus_boleto_30_dias_is_described_as_deferred(self):
+        self.quote.payment_type = "PIX"
+        self.quote.payment_type_2 = "BOLETO_30"
+        self.quote.payment_installments_2 = 1
+        self.quote.payment_split_amount = Decimal("500.00")
+        self.quote.save()
+
+        retail, wholesale = self.quote.get_payment_plans()
+        for plan in (retail, wholesale):
+            self.assertEqual(
+                plan["secondary"]["description"],
+                "Boleto para 30 dias",
+            )
+        self.assertEqual(
+            self.quote.get_payment_description(),
+            "PIX - À vista + Boleto para 30 dias",
+        )
+
+    def test_client_pdf_shows_entry_and_boleto_30_days(self):
+        from pypdf import PdfReader
+
+        self.quote.payment_type = "PIX"
+        self.quote.payment_type_2 = "BOLETO_30"
+        self.quote.payment_installments_2 = 1
+        self.quote.payment_split_amount = Decimal("500.00")
+        self.quote.save()
+        self.client.login(username="admin", password="x")
+
+        resp = self.client.get(reverse("sales:quote_pdf_client", args=[self.quote.id]))
+        text = "\n".join(
+            page.extract_text() or ""
+            for page in PdfReader(BytesIO(resp.content)).pages
+        )
+
+        self.assertIn("Entrada no PIX", text)
+        self.assertIn("Restante no Boleto para 30 dias", text)
+
     def test_items_are_ordered_by_persisted_position(self):
         sofa, puff = list(self.quote.items.order_by("id"))
         sofa.position = 1
@@ -661,6 +755,23 @@ class DualPricingTests(TestCase):
         self.assertEqual(resp["Content-Type"], "application/pdf")
         self.assertGreater(len(resp.content), 1000)
 
+    def test_client_pdf_shows_retail_and_wholesale_installments(self):
+        from pypdf import PdfReader
+
+        self.quote.discount_percent = Decimal("10.0")
+        self.quote.payment_type = "CREDIT_CARD"
+        self.quote.payment_installments = 10
+        self.quote.save()
+        self.client.login(username="admin", password="x")
+
+        resp = self.client.get(reverse("sales:quote_pdf_client", args=[self.quote.id]))
+        text = "\n".join(
+            page.extract_text() or ""
+            for page in PdfReader(BytesIO(resp.content)).pages
+        )
+        self.assertIn("10x de R$ 207,00", text)
+        self.assertIn("10x de R$ 190,00", text)
+
     def test_detail_makes_discount_scope_and_environments_explicit(self):
         first_item = self.quote.items.first()
         first_item.environment = "Sala"
@@ -673,6 +784,74 @@ class DualPricingTests(TestCase):
         self.assertContains(resp, "Atacado (sem desconto)")
         self.assertContains(resp, "Desconto sobre o varejo")
         self.assertContains(resp, "Sala")
+
+    def test_detail_shows_both_installment_options(self):
+        self.quote.discount_percent = Decimal("10.0")
+        self.quote.payment_type = "CREDIT_CARD"
+        self.quote.payment_installments = 10
+        self.quote.save()
+        self.client.login(username="admin", password="x")
+
+        resp = self.client.get(reverse("sales:quote_detail", args=[self.quote.id]))
+        self.assertContains(resp, "10x de R$ 207,00")
+        self.assertContains(resp, "10x de R$ 190,00")
+
+    def test_conversion_records_wholesale_as_the_real_sale_value(self):
+        self.client.login(username="admin", password="x")
+        resp = self.client.post(
+            reverse("sales:quote_convert", args=[self.quote.id]),
+            {
+                "has_item_selection": "1",
+                "selected_price_tier": PriceTier.WHOLESALE,
+            },
+        )
+
+        self.assertEqual(resp.status_code, 302)
+        self.quote.refresh_from_db()
+        self.assertEqual(self.quote.status, QuoteStatus.CONVERTED)
+        self.assertEqual(
+            self.quote.selected_price_tier,
+            PriceTier.WHOLESALE,
+        )
+        self.assertEqual(
+            self.quote.total_value_snapshot,
+            Decimal("1900.00"),
+        )
+
+    def test_commission_engine_uses_wholesale_without_retail_discount(self):
+        from sales.margin import simulate_quote
+
+        self.quote.selected_price_tier = PriceTier.WHOLESALE
+        self.quote.discount_percent = Decimal("10.0")
+        self.quote.save()
+
+        ctx = simulate_quote(self.quote)
+        self.assertEqual(ctx["subtotal"], Decimal("1900.00"))
+        self.assertEqual(ctx["discount_percent"], Decimal("0"))
+        self.assertEqual(ctx["final_total"], Decimal("1900.00"))
+
+    def test_simulator_uses_selected_tier_and_keeps_other_option_visible(self):
+        self.quote.selected_price_tier = PriceTier.WHOLESALE
+        self.quote.discount_percent = Decimal("10.0")
+        self.quote.save()
+        self.client.login(username="admin", password="x")
+
+        resp = self.client.get(
+            reverse("sales:quote_simulate", args=[self.quote.id])
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["pricing_tier"], PriceTier.WHOLESALE)
+        self.assertEqual(resp.context["subtotal"], Decimal("1900.00"))
+        self.assertEqual(resp.context["discount_percent"], Decimal("0"))
+        self.assertEqual(
+            resp.context["alternate_payment_plan"]["tier"],
+            PriceTier.RETAIL,
+        )
+        self.assertEqual(
+            resp.context["alternate_payment_plan"]["total"],
+            Decimal("2070.000"),
+        )
+        self.assertContains(resp, "o desconto pertence somente ao varejo")
 
     def test_client_pdf_keeps_environment_order(self):
         from pypdf import PdfReader

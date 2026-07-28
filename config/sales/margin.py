@@ -127,7 +127,7 @@ def _run_simulation(
         comissao_final = max(Decimal('2'), min(mld_pct, Decimal('5')))
     elif metodo_principal in _DEBIT_COMM:
         comissao_final = Decimal('4')
-    elif metodo_principal == 'BOLETO':
+    elif metodo_principal in {'BOLETO', 'BOLETO_30'}:
         if max_parcelas == 1:
             # boleto à vista = máximo da faixa
             comissao_final = Decimal('4')
@@ -204,7 +204,12 @@ def _build_simulation_context(
     O motor (`_run_simulation`) é a única fonte de verdade para margem,
     custos e comissão.
     """
-    from core.models import PaymentTariff, PaymentMethodType
+    from core.models import (
+        PaymentTariff,
+        PaymentMethodType,
+        payment_condition_label,
+        payment_description,
+    )
 
     MAX_DISCOUNT_ABSOLUTE = Decimal("30")
     MAX_PRICE_INCREASE    = Decimal("30")
@@ -381,16 +386,13 @@ def _build_simulation_context(
     valor_avista = adj_subtotal * (Decimal("1") - Decimal("0.12"))
 
     # ---- Descrições amigáveis ----
-    pt_choices_dict = dict(PaymentMethodType.choices)
     if sim_payment_type:
-        pt_label = pt_choices_dict.get(sim_payment_type, sim_payment_type)
-        desc1 = f"{pt_label} - À vista" if sim_installments == 1 else f"{pt_label} - {sim_installments}x"
+        desc1 = payment_description(sim_payment_type, sim_installments)
     else:
         desc1 = ""
     desc2 = ""
     if split_mode:
-        pt_label2 = pt_choices_dict.get(sim_payment_type_2, sim_payment_type_2)
-        desc2 = f"{pt_label2} - À vista" if sim_installments_2 == 1 else f"{pt_label2} - {sim_installments_2}x"
+        desc2 = payment_description(sim_payment_type_2, sim_installments_2)
         sim_payment_description = f"{desc1} + {desc2}" if desc1 else desc2
     else:
         sim_payment_description = desc1 if desc1 else "Não definido"
@@ -399,6 +401,7 @@ def _build_simulation_context(
     payment_type_choices = list(PaymentMethodType.choices)
     max_inst_map = {
         'CASH': 1, 'PIX': 1, 'DEBIT_CARD': 1, 'CREDIT_CARD': 18, 'CHEQUE': 12, 'BOLETO': 4,
+        'BOLETO_30': 1,
     }
     tariffs_by_type: dict[str, list] = {}
     for pt_val, _pt_lbl in payment_type_choices:
@@ -409,7 +412,7 @@ def _build_simulation_context(
             {
                 'installments': t.installments,
                 'fee': float(t.fee_percent),
-                'label': "À vista" if t.installments == 1 else f"{t.installments}x",
+                'label': payment_condition_label(pt_val, t.installments),
             }
             for t in PaymentTariff.objects.filter(
                 payment_type=tariff_lookup, installments__lte=max_inst
@@ -421,7 +424,7 @@ def _build_simulation_context(
     status = resultado['status']
     controls_blocked = resultado['controls_blocked'] or tariff_missing
 
-    _AVISTA_TYPES = {'PIX', 'CASH', 'DEBIT_CARD', 'CHEQUE', 'BOLETO'}
+    _AVISTA_TYPES = {'PIX', 'CASH', 'DEBIT_CARD', 'CHEQUE', 'BOLETO', 'BOLETO_30'}
     split_m1_avista  = split_mode and sim_payment_type   in _AVISTA_TYPES
     split_m2_avista  = split_mode and sim_payment_type_2 in _AVISTA_TYPES
     split_both_cards = split_mode and not split_m1_avista and not split_m2_avista
@@ -647,14 +650,30 @@ def simulate_quote(quote) -> dict:
     que o vendedor enxerga — mesmo subtotal, mesmo frete faturável, mesmas pernas
     de pagamento, mesma entrada.
     """
+    from sales.models import PriceTier
+
+    # Migrações históricas 0028/0029 usam o modelo real antes de campos mais
+    # novos existirem fisicamente. Ler de __dict__ mantém o backfill compatível
+    # com instalações do zero sem disparar uma consulta ao campo ainda ausente.
+    selected_tier = (
+        quote.__dict__.get("selected_price_tier", PriceTier.RETAIL)
+        if quote.dual_pricing
+        else PriceTier.RETAIL
+    )
     return _build_simulation_context(
-        subtotal=quote.calculate_subtotal(),
+        subtotal=quote.calculate_subtotal_for_tier(selected_tier),
         # Frete por conta da loja (STORE) não é repassado ao cliente: fica fora
         # do total e, portanto, fora da base de comissão.
         freight_value=quote.billable_freight,
         sim_payment_type=quote.payment_type or "",
         sim_has_architect=quote.has_architect,
-        sim_discount=quote.discount_percent or Decimal("0"),
+        # Atacado já é uma tabela reduzida; o desconto comercial pertence
+        # exclusivamente à alternativa de varejo.
+        sim_discount=(
+            Decimal("0")
+            if selected_tier == PriceTier.WHOLESALE
+            else (quote.discount_percent or Decimal("0"))
+        ),
         price_increase_pct=quote.price_increase_percent or Decimal("0"),
         sim_installments=quote.payment_installments or 1,
         sim_payment_type_2=quote.payment_type_2 or "",

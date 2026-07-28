@@ -545,6 +545,15 @@
                         </label>
                         <div class="text-muted small">Ao ligar, cada item ganha um campo de preço de atacado; o PDF do cliente mostra os dois valores.</div>
                       </div>
+                      <div class="pricing-tier-container mb-3" {% if not form.dual_pricing.value %}style="display:none;"{% endif %}>
+                        <label class="form-label fw-bold" for="{{ form.selected_price_tier.id_for_label }}">
+                          Modalidade usada na simulação
+                        </label>
+                        {{ form.selected_price_tier }}
+                        <div class="text-muted small mt-1">
+                          O PDF sempre mostra as duas opções. Esta escolha define qual preço alimenta margem, comissão e o valor da venda; ela pode ser confirmada novamente na conversão.
+                        </div>
+                      </div>
                       {{ formset.management_form }}
                       
                       <div id="formset-container">
@@ -1525,6 +1534,9 @@
         const cb = document.getElementById('{{ form.dual_pricing.id_for_label }}');
         const on = cb ? cb.checked : false;
         document.querySelectorAll('.wholesale-field-container').forEach(el => {
+          el.style.display = on ? '' : 'none';
+        });
+        document.querySelectorAll('.pricing-tier-container').forEach(el => {
           el.style.display = on ? '' : 'none';
         });
       }

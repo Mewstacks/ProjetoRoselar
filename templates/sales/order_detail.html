@@ -577,8 +577,14 @@
               Valores da Venda ao Cliente
             </div>
             <div class="s-body">
+              {% if value_breakdown.dual_pricing %}
+                <div class="r-line" style="background:#f8f9fa;padding:.5rem .65rem;border-radius:7px;margin-bottom:.35rem;">
+                  <span class="r-l">Modalidade fechada</span>
+                  <span style="font-weight:800;color:var(--brand);">{{ value_breakdown.selected_price_tier_label }}</span>
+                </div>
+              {% endif %}
               <div class="r-line">
-                <span class="r-l">Valor original (produtos)</span>
+                <span class="r-l">Valor original dos produtos{% if value_breakdown.dual_pricing %} — {{ value_breakdown.selected_price_tier_label }}{% endif %}</span>
                 <span style="font-weight:700;">R$ {{ value_breakdown.subtotal|floatformat:2 }}</span>
               </div>
               {% if value_breakdown.has_markup %}
@@ -589,7 +595,7 @@
               {% endif %}
               {% if value_breakdown.has_discount %}
                 <div class="r-line">
-                  <span class="r-l">Desconto ({{ value_breakdown.discount_pct|floatformat:1 }}%)</span>
+                  <span class="r-l">Desconto sobre o varejo ({{ value_breakdown.discount_pct|floatformat:1 }}%)</span>
                   <span style="font-weight:700;color:var(--red);">− R$ {{ value_breakdown.discount_amount|floatformat:2 }}</span>
                 </div>
               {% endif %}
@@ -598,7 +604,7 @@
                 <span style="font-weight:700;">R$ {{ value_breakdown.freight|floatformat:2 }}</span>
               </div>
               <div class="r-line">
-                <span class="r-l">Subtotal com desconto + frete</span>
+                <span class="r-l">{{ value_breakdown.selected_price_tier_label }}{% if value_breakdown.has_discount %} com desconto{% endif %} + frete</span>
                 <span style="font-weight:700;">R$ {{ value_breakdown.total_with_discount|floatformat:2 }}</span>
               </div>
               {% if value_breakdown.payment_fee_pct > 0 %}

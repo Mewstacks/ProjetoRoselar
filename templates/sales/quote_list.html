@@ -336,6 +336,9 @@
                     <span><i class="fa-solid fa-user-tie"></i>{{ quote.seller.get_full_name|default:quote.seller.username }}</span>
                     <span><i class="fa-solid fa-box"></i>{{ quote.items.count }} itens</span>
                     <span><i class="fa-solid fa-calendar"></i>{{ quote.quote_date|date:"d/m/Y" }}</span>
+                    {% if quote.dual_pricing and quote.status == 'CONVERTED' or quote.dual_pricing and quote.status == 'POS_VENDA' %}
+                      <span><i class="fa-solid fa-tags"></i>{{ quote.get_selected_price_tier_display }}</span>
+                    {% endif %}
                   </div>
                 </div>
                 <div class="q-val">R$ {{ quote.total_value_snapshot|floatformat:2 }}</div>
@@ -362,6 +365,9 @@
                   <span><i class="fa-solid fa-user-tie"></i>{{ quote.seller.get_full_name|default:quote.seller.username }}</span>
                   <span><i class="fa-solid fa-box"></i>{{ quote.items.count }} itens</span>
                   <span><i class="fa-solid fa-calendar"></i>{{ quote.quote_date|date:"d/m/Y" }}</span>
+                  {% if quote.dual_pricing and quote.status == 'CONVERTED' or quote.dual_pricing and quote.status == 'POS_VENDA' %}
+                    <span><i class="fa-solid fa-tags"></i>{{ quote.get_selected_price_tier_display }}</span>
+                  {% endif %}
                 </div>
               </div>
               <div class="q-val">R$ {{ quote.total_value_snapshot|floatformat:2 }}</div>

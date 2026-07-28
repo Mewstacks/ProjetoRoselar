@@ -22,7 +22,11 @@ def refresh_snapshots(apps, schema_editor):
     # histórico que `apps.get_model` devolve.
     from sales.models import Quote
 
-    for quote in Quote.objects.prefetch_related("items").iterator(chunk_size=200):
+    for quote in (
+        Quote.objects.defer("selected_price_tier")
+        .prefetch_related("items")
+        .iterator(chunk_size=200)
+    ):
         try:
             total = quote.calculate_rounded_total()
         except Exception:

@@ -79,17 +79,34 @@ def _build_value_breakdown(quote):
     frete, taxa de pagamento e o total final — tudo que o financeiro precisa
     revisar antes de aprovar.
     """
-    subtotal = quote.calculate_subtotal()
+    from .models import PriceTier
+
+    selected_tier = (
+        quote.selected_price_tier
+        if quote.dual_pricing
+        else PriceTier.RETAIL
+    )
+    subtotal = quote.calculate_subtotal_for_tier(selected_tier)
     markup_pct = quote.price_increase_percent or Decimal("0.00")
-    discount_pct = quote.discount_percent or Decimal("0.00")
+    discount_pct = (
+        Decimal("0.00")
+        if selected_tier == PriceTier.WHOLESALE
+        else (quote.discount_percent or Decimal("0.00"))
+    )
     markup_amount = subtotal * markup_pct / Decimal("100")
     discount_amount = subtotal * discount_pct / Decimal("100")
     freight = quote.freight_value or Decimal("0.00")
     from .models import FreightResponsible
     freight_to_store = quote.freight_responsible == FreightResponsible.STORE
-    payment_fee = quote.calculate_payment_fee_value()
-    total_with_discount = quote.calculate_total_with_freight_and_discount()
-    rounded_total = quote.calculate_rounded_total()
+    if selected_tier == PriceTier.WHOLESALE:
+        total_with_discount = (
+            subtotal * (Decimal("1") + markup_pct / Decimal("100"))
+            + quote.billable_freight
+        )
+    else:
+        total_with_discount = quote.calculate_total_with_freight_and_discount()
+    rounded_total = quote.calculate_total_for_tier(selected_tier)
+    payment_fee = quote.calculate_payment_fee_value(rounded_total)
     from .models import RoundingMode
     breakdown = {
         "subtotal": subtotal,
@@ -108,14 +125,20 @@ def _build_value_breakdown(quote):
         "rounded_total": rounded_total,
         "rounding_diff": rounded_total - total_with_discount,
         "has_rounding": (
-            quote.total_override is not None
+            (
+                selected_tier == PriceTier.RETAIL
+                and quote.total_override is not None
+            )
             or quote.total_rounding_mode != RoundingMode.NONE
             or (quote.total_manual_adjustment or Decimal("0.00")) != Decimal("0.00")
         ),
         "dual_pricing": quote.dual_pricing,
+        "selected_price_tier": selected_tier,
+        "selected_price_tier_label": PriceTier(selected_tier).label,
+        "payment_plans": quote.get_payment_plans(),
     }
     if quote.dual_pricing:
-        # Rótulos explícitos: o total padrão é o de varejo.
+        breakdown["rounded_total_retail"] = quote.calculate_rounded_total()
         breakdown["subtotal_wholesale"] = quote.calculate_subtotal_wholesale()
         breakdown["rounded_total_wholesale"] = quote.calculate_rounded_total_wholesale()
     return breakdown
@@ -323,6 +346,8 @@ from .forms import QuoteForm, QuoteItemFormSet, OrderForm, OrderItemFormSet
 from .models import (
     Quote,
     QuoteStatus,
+    PriceTier,
+    build_payment_plan,
     QuoteItem,
     QuoteItemImage,
     Order,
@@ -381,6 +406,7 @@ def payment_method_fees_api(request: HttpRequest) -> JsonResponse:
         'CREDIT_CARD': 18,
         'CHEQUE': 12,
         'BOLETO': 4,
+        'BOLETO_30': 1,
     }
     
     is_installment = payment_type in ['CREDIT_CARD', 'CHEQUE', 'BOLETO']
@@ -618,6 +644,8 @@ def quote_edit(request: HttpRequest, quote_id: int) -> HttpResponse:
                 # a origem ao apagar itens); usado para sincronizar os pedidos.
                 original_links = _capture_order_item_links(quote)
 
+                if not quote_obj.dual_pricing:
+                    quote_obj.selected_price_tier = PriceTier.RETAIL
                 quote_obj.save()
                 formset.save()
                 _persist_item_order_from_formset(formset)
@@ -627,6 +655,8 @@ def quote_edit(request: HttpRequest, quote_id: int) -> HttpResponse:
                 # de compra já gerados.
                 if quote.orders.exists():
                     _sync_orders_from_quote(quote, original_links)
+                if quote.status in SOLD_STATUSES:
+                    persist_quote_commission(quote)
 
             from core.models import AuditLog, AuditAction
             AuditLog.log(request.user, AuditAction.EDIT_QUOTE,
@@ -888,6 +918,18 @@ def quote_convert_to_orders(request: HttpRequest, quote_id: int) -> HttpResponse
             if not all_items:
                 raise ValidationError("Orçamento sem itens não pode ser convertido.")
 
+            selected_price_tier = request.POST.get(
+                "selected_price_tier",
+                PriceTier.RETAIL,
+            )
+            if quote.dual_pricing:
+                if selected_price_tier not in PriceTier.values:
+                    raise ValidationError(
+                        "Escolha se a venda foi fechada no varejo ou no atacado."
+                    )
+            else:
+                selected_price_tier = PriceTier.RETAIL
+
             # Compatibilidade: se o formulário não enviar seleção explícita,
             # mantém comportamento antigo (todos os itens do orçamento).
             has_item_selection = request.POST.get("has_item_selection") == "1"
@@ -964,7 +1006,8 @@ def quote_convert_to_orders(request: HttpRequest, quote_id: int) -> HttpResponse
 
             quote.status = QuoteStatus.CONVERTED
             quote.sale_date = timezone.localdate()
-            quote.save(update_fields=["status", "sale_date"])
+            quote.selected_price_tier = selected_price_tier
+            quote.save(update_fields=["status", "sale_date", "selected_price_tier"])
 
             # Congela a comissão apurada pelo motor de margem. É a única forma de
             # o relatório mostrar exatamente o mesmo número que o vendedor viu no
@@ -1040,7 +1083,8 @@ def quote_convert_to_orders(request: HttpRequest, quote_id: int) -> HttpResponse
 
         from core.models import AuditLog, AuditAction, Notification, NotificationType
         AuditLog.log(request.user, AuditAction.CONVERT_ORDER,
-                     f"Orçamento {quote.number} convertido em pedido", obj=quote,
+                     f"Orçamento {quote.number} convertido em pedido "
+                     f"({quote.get_selected_price_tier_display()})", obj=quote,
                      ip_address=request.META.get('REMOTE_ADDR'))
 
         if quote.seller != request.user:
@@ -1271,7 +1315,14 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
     ITEM_H   = 178
     ENV_H    = 32
     IMG_SZ   = 128
+    PAYMENT_PLANS = quote.get_payment_plans()
     FOOTER_H = 250
+    if quote.dual_pricing:
+        FOOTER_H += 70
+    if any(plan["split_active"] for plan in PAYMENT_PLANS):
+        FOOTER_H += 55 if quote.dual_pricing else 25
+    if any(plan["down_payment"] > 0 for plan in PAYMENT_PLANS):
+        FOOTER_H += 35
 
     items = list(
         quote.items.prefetch_related('images').order_by('position', 'id')
@@ -1460,14 +1511,8 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
         subtotal   = quote.calculate_subtotal()
         disc_pct   = quote.discount_percent or Decimal('0')
         disc_val   = subtotal * disc_pct / Decimal('100')
-        avista     = quote.calculate_rounded_total()   # total real ao cliente (com frete)
+        avista     = PAYMENT_PLANS[0]["total"]
         list_price = avista + disc_val                 # "valor sem desconto"
-
-        from core.models import PaymentMethodType
-        _pay_names = dict(PaymentMethodType.choices)
-
-        def _method_label(code):
-            return _pay_names.get(code, code or "")
 
         # ── Helpers de linha ─────────────────────────────────────────────
         def _row(label, value, *, lbl_color=NAVY, val_color=NAVY,
@@ -1486,13 +1531,6 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
                 c.setLineWidth(0.7)
                 c.line(MX + CW - vw, ty + 3, MX + CW, ty + 3)
             ty -= 16
-
-        def _subnote(text):
-            nonlocal ty
-            c.setFillColor(GRAY)
-            c.setFont(FONT_REG, 8)
-            c.drawString(MX + 12, ty, text)
-            ty -= 13
 
         # rótulo "COMO PAGAR"
         c.setFillColor(GRAY)
@@ -1514,37 +1552,42 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
                     val_font=(FONT_BOLD, 9.5),
                 )
 
-        split_active = bool(quote.payment_type_2) and quote.payment_split_amount is not None
+        for plan in PAYMENT_PLANS:
+            prefix = f"{plan['tier_label']} — " if quote.dual_pricing else ""
 
-        if split_active:
-            # Pagamento composto: Entrada (método 1) + Restante (método 2).
-            # Ambas as pernas particionam o total real ao cliente (com frete).
-            entrada_val  = min(quote.payment_split_amount, avista)
-            restante_val = max(Decimal('0'), avista - entrada_val)
-            n1 = quote.payment_installments or 1
-            n2 = quote.payment_installments_2 or 1
-            m1 = _method_label(quote.payment_type)
-            m2 = _method_label(quote.payment_type_2)
+            if plan["down_payment"] > 0:
+                _row(
+                    f"{prefix}Entrada à vista",
+                    _fmt_brl(plan["down_payment"]),
+                    lbl_font=(FONT_BOLD, 9),
+                )
 
-            _row(f"Entrada no {m1}" if m1 else "Entrada", _fmt_brl(entrada_val))
-            if n1 > 1:
-                _subnote(f"em {n1}x de {_fmt_brl(entrada_val / Decimal(n1))} sem juros")
+            for leg in plan["legs"]:
+                if leg["amount"] <= 0:
+                    continue
+                if plan["split_active"]:
+                    action = leg["role"]
+                elif plan["down_payment"] > 0:
+                    action = "Restante"
+                elif leg["method"] == "BOLETO_30":
+                    action = "Boleto para 30 dias"
+                else:
+                    action = "Parcelado" if leg["installments"] > 1 else "À vista"
 
-            _row(f"Restante no {m2}" if m2 else "Restante", _fmt_brl(restante_val))
-            if n2 > 1:
-                _subnote(f"em {n2}x de {_fmt_brl(restante_val / Decimal(n2))} sem juros")
-        else:
-            n  = quote.payment_installments or 1
-            m1 = _method_label(quote.payment_type)
-            if n > 1:
-                parcela = avista / Decimal(n)
-                lbl = f"Parcelado no {m1}" if m1 else "Parcelado"
-                _row(lbl, f"{n}x de {_fmt_brl(parcela)}")
-                _subnote("sem juros")
-            else:
-                # Sempre mostra a linha à vista — evita a seção "COMO PAGAR"
-                # ficar vazia quando não há forma de pagamento selecionada.
-                _row(f"À vista no {m1}" if m1 else "À vista", _fmt_brl(avista))
+                method_suffix = (
+                    f" no {leg['method_label']}"
+                    if leg["method_label"] and action != leg["method_label"]
+                    else ""
+                )
+                label = f"{prefix}{action}{method_suffix}"
+                if leg["installments"] > 1:
+                    value = (
+                        f"{leg['installments']}x de "
+                        f"{_fmt_brl(leg['installment_value'])}"
+                    )
+                else:
+                    value = _fmt_brl(leg["amount"])
+                _row(label, value)
 
         # ── Barra de total destacada (navy) ──────────────────────────────
         ty -= 6
@@ -1565,7 +1608,7 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
 
         # ── Total de atacado (orçamento atacado + varejo) ────────────────
         if quote.dual_pricing:
-            avista_atacado = quote.calculate_rounded_total_wholesale()
+            avista_atacado = PAYMENT_PLANS[1]["total"]
             ty = bar_y - 10
             atac_h = 34
             atac_y = ty - atac_h
@@ -2701,6 +2744,63 @@ def order_pdf(request: HttpRequest, order_id: int) -> HttpResponse:
     return response
 
 
+def _attach_dual_payment_simulation(ctx: dict, quote: Quote) -> None:
+    """Acrescenta ao simulador as parcelas das duas modalidades do orçamento."""
+    if not quote.dual_pricing:
+        return
+
+    common = {
+        "payment_type": ctx["sim_payment_type"],
+        "installments": ctx["sim_installments"],
+        "payment_type_2": ctx["sim_payment_type_2"],
+        "installments_2": ctx["sim_installments_2"],
+        "split_amount": (
+            ctx["split_amount_1"] if ctx["split_mode"] else None
+        ),
+        "down_payment": ctx["down_payment_value"],
+    }
+    pricing_tier = ctx["pricing_tier"]
+    markup_pct = ctx["price_increase_pct"]
+    retail_discount = (
+        ctx["discount_percent"]
+        if pricing_tier == PriceTier.RETAIL
+        else (quote.discount_percent or Decimal("0"))
+    )
+    retail_total = (
+        ctx["final_total"]
+        if pricing_tier == PriceTier.RETAIL
+        else quote.apply_client_rounding(
+            quote.calculate_subtotal()
+            * (
+                Decimal("1")
+                + markup_pct / Decimal("100")
+                - retail_discount / Decimal("100")
+            )
+            + quote.billable_freight
+        )
+    )
+    wholesale_total = (
+        ctx["final_total"]
+        if pricing_tier == PriceTier.WHOLESALE
+        else quote.calculate_rounded_total_wholesale(markup_pct=markup_pct)
+    )
+    ctx["retail_payment_plan"] = build_payment_plan(
+        total=retail_total,
+        tier=PriceTier.RETAIL,
+        **common,
+    )
+    ctx["wholesale_payment_plan"] = build_payment_plan(
+        total=wholesale_total,
+        tier=PriceTier.WHOLESALE,
+        **common,
+    )
+    ctx["alternate_payment_plan"] = (
+        ctx["wholesale_payment_plan"]
+        if pricing_tier == PriceTier.RETAIL
+        else ctx["retail_payment_plan"]
+    )
+
+
 @login_required
 @require_http_methods(["GET", "POST"])
 def quote_simulate_commission(request: HttpRequest, quote_id: int) -> HttpResponse:
@@ -2711,7 +2811,12 @@ def quote_simulate_commission(request: HttpRequest, quote_id: int) -> HttpRespon
         messages.error(request, "Acesso negado.")
         return redirect("sales:quote_list")
 
-    subtotal = quote.calculate_subtotal()
+    pricing_tier = (
+        quote.selected_price_tier
+        if quote.dual_pricing
+        else PriceTier.RETAIL
+    )
+    subtotal = quote.calculate_subtotal_for_tier(pricing_tier)
     # Frete por conta da loja (STORE) não é repassado ao cliente: fica fora do
     # total e da comissão. billable_freight já zera esse caso.
     freight_value = quote.billable_freight
@@ -2724,6 +2829,8 @@ def quote_simulate_commission(request: HttpRequest, quote_id: int) -> HttpRespon
             sim_discount = Decimal(request.POST.get('discount_percent', '0') or '0')
         except Exception:
             sim_discount = Decimal('0')
+        if pricing_tier == PriceTier.WHOLESALE:
+            sim_discount = Decimal("0")
         try:
             price_increase_pct = Decimal(request.POST.get('price_increase_percent', '0') or '0')
         except Exception:
@@ -2753,7 +2860,11 @@ def quote_simulate_commission(request: HttpRequest, quote_id: int) -> HttpRespon
         sim_payment_type    = quote.payment_type or ''
         sim_has_architect   = quote.has_architect
         sim_architect_id    = str(quote.architect_id or '')
-        sim_discount        = quote.discount_percent or Decimal("0")
+        sim_discount        = (
+            Decimal("0")
+            if pricing_tier == PriceTier.WHOLESALE
+            else (quote.discount_percent or Decimal("0"))
+        )
         price_increase_pct  = quote.price_increase_percent or Decimal('0')
         sim_installments    = quote.payment_installments or 1
         sim_payment_type_2  = quote.payment_type_2 or ''
@@ -2784,6 +2895,9 @@ def quote_simulate_commission(request: HttpRequest, quote_id: int) -> HttpRespon
         price_increase_pct_2=price_increase_pct_2,
         down_payment_value=down_payment_value,
     )
+    ctx["pricing_tier"] = pricing_tier
+    ctx["pricing_tier_label"] = PriceTier(pricing_tier).label
+    _attach_dual_payment_simulation(ctx, quote)
 
     save_session_key = f"quote_sim_saved_{quote.id}"
     quote_actions_unlocked = bool(request.session.get(save_session_key, False))
@@ -2799,7 +2913,8 @@ def quote_simulate_commission(request: HttpRequest, quote_id: int) -> HttpRespon
             ctx['is_admin'] = _is_admin(request.user)
             return render(request, 'sales/quote_simulation.html', ctx)
         with transaction.atomic():
-            quote.discount_percent       = ctx['discount_percent']
+            if pricing_tier == PriceTier.RETAIL:
+                quote.discount_percent = ctx['discount_percent']
             quote.price_increase_percent = ctx['price_increase_pct']
             quote.payment_type           = ctx['sim_payment_type']
             quote.payment_installments   = ctx['sim_installments']

@@ -23,6 +23,7 @@ class QuoteAdmin(SellerAccess, admin.ModelAdmin):
         "discount_percent", "discount_authorized_by", "discount_authorized_at",
         "payment_type", "payment_installments", "payment_fee_percent",
         "total_override", "total_rounding_mode", "total_manual_adjustment",
+        "dual_pricing", "selected_price_tier",
         "has_architect", "notes",
     )
 
