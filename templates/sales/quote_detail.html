@@ -373,7 +373,7 @@
               <div class="hi-v">R$ {{ quote.total_value_snapshot|floatformat:2 }}</div>
               {% if quote.dual_pricing %}
                 <div style="font-size:.8rem;font-weight:700;margin-top:.35rem;padding-top:.35rem;border-top:1px solid rgba(255,255,255,.2);">
-                  Atacado: R$ {{ value_breakdown.rounded_total_wholesale|floatformat:2 }}
+                  Atacado (sem desconto): R$ {{ value_breakdown.rounded_total_wholesale|floatformat:2 }}
                 </div>
               {% endif %}
               {% if quote.payment_fee_percent > 0 %}
@@ -417,7 +417,7 @@
             {% endif %}
             {% if value_breakdown.has_discount %}
               <div class="r-line">
-                <span class="r-l">Desconto ({{ value_breakdown.discount_pct|floatformat:1 }}%)</span>
+                <span class="r-l">Desconto{% if quote.dual_pricing %} sobre o varejo{% endif %} ({{ value_breakdown.discount_pct|floatformat:1 }}%)</span>
                 <span style="font-weight:700;color:var(--red);">− R$ {{ value_breakdown.discount_amount|floatformat:2 }}</span>
               </div>
             {% endif %}
@@ -426,7 +426,7 @@
               <span style="font-weight:700;{% if value_breakdown.freight_to_store %}text-decoration:line-through;opacity:.6;{% endif %}">R$ {{ value_breakdown.freight|floatformat:2 }}</span>
             </div>
             <div class="r-line">
-              <span class="r-l">Subtotal com desconto{% if not value_breakdown.freight_to_store %} + frete{% endif %}</span>
+              <span class="r-l">{% if quote.dual_pricing %}Varejo{% else %}Subtotal{% endif %} com desconto{% if not value_breakdown.freight_to_store %} + frete{% endif %}</span>
               <span style="font-weight:700;">R$ {{ value_breakdown.total_with_discount|floatformat:2 }}</span>
             </div>
             {% if value_breakdown.has_rounding %}
@@ -528,12 +528,28 @@
                   <th>Fornecedor</th>
                   <th>Descrição</th>
                   <th style="text-align:center;">Qtd</th>
-                  <th style="text-align:right;">Valor Unit.</th>
-                  <th style="text-align:right;">Total</th>
+                  <th style="text-align:right;">Valor Unit.{% if quote.dual_pricing %} Varejo{% endif %}</th>
+                  {% if quote.dual_pricing %}
+                    <th style="text-align:right;">Valor Unit. Atacado</th>
+                  {% endif %}
+                  <th style="text-align:right;">Total{% if quote.dual_pricing %} Varejo{% endif %}</th>
+                  {% if quote.dual_pricing %}
+                    <th style="text-align:right;">Total Atacado</th>
+                  {% endif %}
                 </tr>
               </thead>
               <tbody>
                 {% for item in quote.items.all %}
+                  {% ifchanged item.environment %}
+                    {% if item.environment %}
+                      <tr style="background:#f1f3f5;">
+                        <td colspan="{% if quote.dual_pricing %}9{% else %}7{% endif %}"
+                            style="padding:.55rem .75rem;font-size:.76rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--brand);">
+                          <i class="fa-solid fa-door-open me-1"></i>{{ item.environment }}
+                        </td>
+                      </tr>
+                    {% endif %}
+                  {% endifchanged %}
                   <tr>
                     <td><span class="item-num">{{ forloop.counter }}</span></td>
                     <td style="font-weight:700;">{{ item.product_name }}</td>
@@ -547,11 +563,17 @@
                     <td style="color:var(--muted);font-size:.8rem;">{{ item.description|truncatewords:10 }}</td>
                     <td style="text-align:center;font-weight:600;">{{ item.quantity }}</td>
                     <td style="text-align:right;">R$ {{ item.unit_value|floatformat:2 }}</td>
+                    {% if quote.dual_pricing %}
+                      <td style="text-align:right;">R$ {{ item.wholesale_unit_value|floatformat:2 }}</td>
+                    {% endif %}
                     <td style="text-align:right;font-weight:700;">R$ {{ item.line_total|floatformat:2 }}</td>
+                    {% if quote.dual_pricing %}
+                      <td style="text-align:right;font-weight:700;">R$ {{ item.line_total_wholesale|floatformat:2 }}</td>
+                    {% endif %}
                   </tr>
                 {% empty %}
                   <tr>
-                    <td colspan="7" style="text-align:center;padding:2rem;color:var(--muted);">
+                    <td colspan="{% if quote.dual_pricing %}9{% else %}7{% endif %}" style="text-align:center;padding:2rem;color:var(--muted);">
                       <i class="fa-solid fa-inbox" style="font-size:1.5rem;display:block;margin-bottom:.5rem;opacity:.4;"></i>
                       Nenhum item encontrado
                     </td>
@@ -754,6 +776,9 @@
                               <span>
                                 <strong style="color:var(--brand);">{{ item.product_name }}</strong>
                                 <span style="color:var(--muted);">- Qtd {{ item.quantity }}</span>
+                                {% if item.environment %}
+                                  <span style="color:var(--muted);">- {{ item.environment }}</span>
+                                {% endif %}
                                 {% if item.supplier %}
                                   <span style="color:#0f5132;">- {{ item.supplier.name }}</span>
                                 {% else %}

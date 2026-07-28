@@ -558,7 +558,7 @@
                             {% endif %}
                             
                             <div class="row">
-                              <div class="col-md-12 mb-3">
+                              <div class="col-md-6 mb-3">
                                 <label class="form-label fw-bold">Fornecedor</label>
                                 <div class="d-flex gap-2 align-items-start">
                                   <div class="flex-grow-1">{{ item_form.supplier }}</div>
@@ -568,6 +568,17 @@
                                 </div>
                                 {% if item_form.supplier.errors %}
                                   <div class="text-danger small">{{ item_form.supplier.errors }}</div>
+                                {% endif %}
+                              </div>
+                              <div class="col-md-6 mb-3">
+                                <label class="form-label fw-bold">
+                                  <i class="fa-solid fa-door-open me-1"></i>Ambiente
+                                  <span class="text-muted" style="font-weight:400;">(opcional)</span>
+                                </label>
+                                {{ item_form.environment }}
+                                <div class="text-muted small mt-1">Agrupa os produtos no PDF, sem alterar a ordem cadastrada.</div>
+                                {% if item_form.environment.errors %}
+                                  <div class="text-danger small">{{ item_form.environment.errors }}</div>
                                 {% endif %}
                               </div>
                             </div>

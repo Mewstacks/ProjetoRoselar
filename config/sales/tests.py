@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+from io import BytesIO
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -572,9 +573,122 @@ class DualPricingTests(TestCase):
         self.assertEqual(self.quote.calculate_rounded_total(), Decimal("2500.00"))
         self.assertEqual(self.quote.calculate_rounded_total_wholesale(), Decimal("1900.00"))
 
+    def test_discount_applies_only_to_retail_total(self):
+        self.quote.discount_percent = Decimal("10.0")
+        self.quote.save(update_fields=["discount_percent"])
+
+        # Varejo: 2.300 - 10% = 2.070. Atacado já é outra tabela de
+        # preços e permanece em 1.900, sem receber um segundo desconto.
+        self.assertEqual(self.quote.calculate_rounded_total(), Decimal("2070.000"))
+        self.assertEqual(
+            self.quote.calculate_rounded_total_wholesale(),
+            Decimal("1900.000"),
+        )
+
+    def test_items_are_ordered_by_persisted_position(self):
+        sofa, puff = list(self.quote.items.order_by("id"))
+        sofa.position = 1
+        sofa.environment = "Sala"
+        puff.position = 0
+        puff.environment = "Dormitório"
+        sofa.save(update_fields=["position", "environment"])
+        puff.save(update_fields=["position", "environment"])
+
+        self.assertEqual(
+            list(self.quote.items.values_list("product_name", flat=True)),
+            ["Puff", "Sofá"],
+        )
+
+    def test_edit_persists_submitted_item_order_and_environment(self):
+        sofa, puff = list(self.quote.items.order_by("id"))
+        self.client.login(username="admin", password="x")
+        resp = self.client.post(
+            reverse("sales:quote_edit", args=[self.quote.id]),
+            {
+                "customer": self.customer.id,
+                "quote_date": "2026-07-28",
+                "freight_responsible": "CUSTOMER",
+                "discount_percent": "0.0",
+                "payment_type": "",
+                "payment_installments": "1",
+                "payment_fee_percent": "0",
+                "total_override": "",
+                "dual_pricing": "on",
+                "notes": "",
+                "items-TOTAL_FORMS": "2",
+                "items-INITIAL_FORMS": "2",
+                "items-MIN_NUM_FORMS": "0",
+                "items-MAX_NUM_FORMS": "1000",
+                "items-0-id": puff.id,
+                "items-0-supplier": "",
+                "items-0-environment": "Dormitório",
+                "items-0-product_name": "Puff",
+                "items-0-description": "",
+                "items-0-quantity": "1",
+                "items-0-unit_value": "300,00",
+                "items-0-unit_value_wholesale": "",
+                "items-0-architect_percent": "0",
+                "items-1-id": sofa.id,
+                "items-1-supplier": "",
+                "items-1-environment": "Sala",
+                "items-1-product_name": "Sofá",
+                "items-1-description": "",
+                "items-1-quantity": "2",
+                "items-1-unit_value": "1.000,00",
+                "items-1-unit_value_wholesale": "800,00",
+                "items-1-architect_percent": "0",
+            },
+        )
+
+        self.assertEqual(
+            resp.status_code,
+            302,
+            getattr(resp, "context", None) and resp.context["formset"].errors,
+        )
+        self.assertEqual(
+            list(self.quote.items.values_list("product_name", flat=True)),
+            ["Puff", "Sofá"],
+        )
+        self.assertEqual(
+            list(self.quote.items.values_list("environment", flat=True)),
+            ["Dormitório", "Sala"],
+        )
+
     def test_client_pdf_renders_with_dual_pricing(self):
         self.client.login(username="admin", password="x")
         resp = self.client.get(reverse("sales:quote_pdf_client", args=[self.quote.id]))
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp["Content-Type"], "application/pdf")
         self.assertGreater(len(resp.content), 1000)
+
+    def test_detail_makes_discount_scope_and_environments_explicit(self):
+        first_item = self.quote.items.first()
+        first_item.environment = "Sala"
+        first_item.save(update_fields=["environment"])
+        self.quote.discount_percent = Decimal("10.0")
+        self.quote.save(update_fields=["discount_percent"])
+
+        self.client.login(username="admin", password="x")
+        resp = self.client.get(reverse("sales:quote_detail", args=[self.quote.id]))
+        self.assertContains(resp, "Atacado (sem desconto)")
+        self.assertContains(resp, "Desconto sobre o varejo")
+        self.assertContains(resp, "Sala")
+
+    def test_client_pdf_keeps_environment_order(self):
+        from pypdf import PdfReader
+
+        sofa, puff = list(self.quote.items.order_by("id"))
+        sofa.position = 1
+        sofa.environment = "Sala"
+        puff.position = 0
+        puff.environment = "Dormitório"
+        sofa.save(update_fields=["position", "environment"])
+        puff.save(update_fields=["position", "environment"])
+
+        self.client.login(username="admin", password="x")
+        resp = self.client.get(reverse("sales:quote_pdf_client", args=[self.quote.id]))
+        text = "\n".join(
+            page.extract_text() or ""
+            for page in PdfReader(BytesIO(resp.content)).pages
+        )
+        self.assertLess(text.index("Dormitório"), text.index("Sala"))

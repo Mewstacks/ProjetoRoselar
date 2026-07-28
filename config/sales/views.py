@@ -173,6 +173,28 @@ def _persist_item_images_from_formset(formset) -> None:
         QuoteItemImage.objects.create(item=item, image=uploaded_image)
 
 
+def _persist_item_order_from_formset(formset) -> None:
+    """Grava a ordem visual enviada pelo formset.
+
+    O banco não garante ordem sem uma coluna explícita. Usar a sequência dos
+    formulários evita que o PDF embaralhe itens depois de criar ou editar.
+    """
+    ordered_items = []
+    for item_form in formset.forms:
+        if not hasattr(item_form, "cleaned_data"):
+            continue
+        if item_form.cleaned_data.get("DELETE"):
+            continue
+        item = item_form.instance
+        if not item or not item.pk:
+            continue
+        item.position = len(ordered_items)
+        ordered_items.append(item)
+
+    if ordered_items:
+        QuoteItem.objects.bulk_update(ordered_items, ["position"])
+
+
 def _capture_order_item_links(quote) -> dict:
     """Fotografa o vínculo OrderItem→QuoteItem ANTES de salvar a edição.
 
@@ -523,6 +545,7 @@ def quote_create(request: HttpRequest) -> HttpResponse:
 
                 formset.instance = quote
                 formset.save()
+                _persist_item_order_from_formset(formset)
                 _persist_item_images_from_formset(formset)
 
             from core.models import AuditLog, AuditAction
@@ -597,6 +620,7 @@ def quote_edit(request: HttpRequest, quote_id: int) -> HttpResponse:
 
                 quote_obj.save()
                 formset.save()
+                _persist_item_order_from_formset(formset)
                 _persist_item_images_from_formset(formset)
 
                 # Orçamento já convertido: propaga as alterações para os pedidos
@@ -1245,10 +1269,13 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
     CW       = page_w - 2 * MX
     HEADER_H = 72
     ITEM_H   = 178
+    ENV_H    = 32
     IMG_SZ   = 128
-    FOOTER_H = 230
+    FOOTER_H = 250
 
-    items = list(quote.items.prefetch_related('images').all())
+    items = list(
+        quote.items.prefetch_related('images').order_by('position', 'id')
+    )
 
     def _items_page_bg():
         # Fundo branco em toda a página de itens (header + lista de produtos),
@@ -1291,6 +1318,20 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
         c.setFillColor(GRAY)
         c.setFont(FONT_REG, 7)
         c.drawCentredString(x + sz / 2, y + sz / 2 - 4, "sem imagem")
+
+    def _draw_environment(environment, y_top):
+        """Desenha a divisão de ambiente sem alterar a ordem dos itens."""
+        bar_h = 23
+        bar_y = y_top - bar_h
+        c.setFillColor(colors.HexColor('#F1F1F1'))
+        c.roundRect(MX, bar_y, CW, bar_h, 4, fill=1, stroke=0)
+        c.setFillColor(GRAY)
+        c.setFont(FONT_BOLD, 7)
+        c.drawString(MX + 10, bar_y + 8, "AMBIENTE")
+        c.setFillColor(NAVY)
+        c.setFont(FONT_BOLD, 10)
+        c.drawString(MX + 66, bar_y + 7, environment)
+        return y_top - ENV_H
 
     def _draw_item(item, y_top, idx):
         img_right = (idx % 2 == 0)
@@ -1367,14 +1408,10 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
 
         if quote.dual_pricing:
             # Dois preços por item: varejo (unit_value) e atacado
-            # (unit_value_wholesale, caindo no varejo se em branco). Mesmo markup
-            # do varejo, para reconciliar com os totais.
-            wholesale_unit = item.unit_value_wholesale
-            if wholesale_unit is None:
-                wholesale_unit = item.unit_value
+            # (unit_value_wholesale, caindo no varejo se em branco).
             _price_block(txt_x, f"varejo · {qty_label}", unit_price)
             _price_block(txt_x + txt_w / 2, f"atacado · {qty_label}",
-                         wholesale_unit * markup_mult)
+                         item.wholesale_unit_value * markup_mult)
         else:
             _price_block(txt_x, qty_label, unit_price)
 
@@ -1463,9 +1500,19 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
         ty -= 15
 
         if disc_pct > 0:
-            _row("Valor sem desconto", _fmt_brl(list_price),
+            retail_label = "Varejo sem desconto" if quote.dual_pricing else "Valor sem desconto"
+            _row(retail_label, _fmt_brl(list_price),
                  lbl_color=GRAY, val_color=GRAY,
                  val_font=(FONT_REG, 10), strike=True)
+            if quote.dual_pricing:
+                _row(
+                    f"Desconto aplicado ao varejo ({disc_pct}%)",
+                    f"- {_fmt_brl(disc_val)}",
+                    lbl_color=GRAY,
+                    val_color=GRAY,
+                    lbl_font=(FONT_REG, 8.5),
+                    val_font=(FONT_BOLD, 9.5),
+                )
 
         split_active = bool(quote.payment_type_2) and quote.payment_split_amount is not None
 
@@ -1527,23 +1574,39 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
             c.roundRect(MX, atac_y, CW, atac_h, 6, fill=0, stroke=1)
             c.setFillColor(NAVY)
             c.setFont(FONT_REG, 9.5)
-            c.drawString(MX + 16, atac_y + atac_h / 2 - 3, "Valor do investimento — Atacado")
+            c.drawString(
+                MX + 16,
+                atac_y + atac_h / 2 - 3,
+                "Valor do investimento — Atacado (sem desconto)",
+            )
             c.setFont(FONT_BOLD, 15)
             c.drawRightString(MX + CW - 16, atac_y + atac_h / 2 - 5, _fmt_brl(avista_atacado))
 
     _items_page_bg()
     cur_y = _draw_header()
 
+    previous_environment = None
     for i, item in enumerate(items):
+        environment = (item.environment or "").strip()
+        starts_environment = bool(environment) and environment != previous_environment
         is_last = (i == len(items) - 1)
-        space_needed = ITEM_H + (FOOTER_H if is_last else 0)
+        space_needed = (
+            ITEM_H
+            + (ENV_H if starts_environment else 0)
+            + (FOOTER_H if is_last else 0)
+        )
 
         if cur_y - space_needed < MY:
             c.showPage()
             _items_page_bg()
             cur_y = page_h - MY - 15
+            # Repete o ambiente no topo quando a seção continua em nova página.
+            starts_environment = bool(environment)
 
+        if starts_environment:
+            cur_y = _draw_environment(environment, cur_y)
         cur_y = _draw_item(item, cur_y, i)
+        previous_environment = environment
 
     if cur_y - FOOTER_H < MY:
         c.showPage()
@@ -2920,6 +2983,8 @@ def quote_duplicate(request, quote_id):
             total_override=original.total_override,
             total_rounding_mode=original.total_rounding_mode,
             total_manual_adjustment=original.total_manual_adjustment,
+            dual_pricing=original.dual_pricing,
+            notes=original.notes,
         )
 
         for item in original.items.all():
@@ -2928,8 +2993,11 @@ def quote_duplicate(request, quote_id):
                 supplier=item.supplier,
                 product_name=item.product_name,
                 description=item.description,
+                environment=item.environment,
+                position=item.position,
                 quantity=item.quantity,
                 unit_value=item.unit_value,
+                unit_value_wholesale=item.unit_value_wholesale,
                 condition_text=item.condition_text,
                 architect_percent=item.architect_percent,
             )

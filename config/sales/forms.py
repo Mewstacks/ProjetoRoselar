@@ -225,6 +225,7 @@ class QuoteItemForm(forms.ModelForm):
         model = QuoteItem
         fields = [
             "supplier",
+            "environment",
             "product_name",
             "description",
             "quantity",
@@ -233,6 +234,10 @@ class QuoteItemForm(forms.ModelForm):
             "architect_percent",
         ]
         widgets = {
+            "environment": forms.TextInput(attrs={
+                "class": "form-control",
+                "placeholder": "Ex.: Dormitório, Cozinha, Sala...",
+            }),
             "description": forms.Textarea(attrs={"rows": 1}),
         }
 

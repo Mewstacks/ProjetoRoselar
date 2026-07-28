@@ -468,12 +468,17 @@ class Quote(models.Model):
     def calculate_rounded_total_wholesale(self) -> Decimal:
         """Total de venda ao cliente no preço de atacado.
 
-        Reusa a mesma regra de varejo (markup, desconto, frete e
-        arredondamento/ajuste legado), trocando só a base pelo subtotal de
-        atacado. Ignora total_override, que se refere ao total de varejo.
+        O desconto comercial do orçamento incide exclusivamente sobre o
+        varejo. O atacado já é uma segunda tabela de preços e não pode receber
+        o desconto novamente. Mantém apenas o ajuste de preço, o frete e o
+        arredondamento/ajuste legado. Ignora ``total_override``, que se refere
+        somente ao total de varejo.
         """
-        base = self.calculate_total_with_freight_and_discount(
-            self.calculate_subtotal_wholesale()
+        subtotal = self.calculate_subtotal_wholesale()
+        markup_pct = self.price_increase_percent or Decimal("0.0")
+        base = (
+            subtotal * (Decimal("1") + markup_pct / Decimal("100"))
+            + self.billable_freight
         )
         return self.apply_client_rounding(base, use_override=False)
 
@@ -493,6 +498,17 @@ class QuoteItem(models.Model):
 
     product_name = models.CharField(max_length=160, verbose_name="Produto")
     description = models.TextField(blank=True, verbose_name="Descrição")
+    environment = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name="Ambiente",
+        help_text="Ex.: Dormitório, Cozinha ou Sala de Estar.",
+    )
+    position = models.PositiveIntegerField(
+        default=0,
+        verbose_name="Posição",
+        help_text="Ordem do item no orçamento e no PDF.",
+    )
 
     quantity = models.PositiveIntegerField(default=1, verbose_name="Qtd")
     unit_value = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"), verbose_name="Valor Unit.")
@@ -519,6 +535,7 @@ class QuoteItem(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Criado em")
 
     class Meta:
+        ordering = ["position", "id"]
         verbose_name = "Item do Orçamento"
         verbose_name_plural = "Itens do Orçamento"
         indexes = [
@@ -534,16 +551,20 @@ class QuoteItem(models.Model):
         return (self.unit_value or Decimal("0.00")) * Decimal(self.quantity or 0)
 
     @property
+    def wholesale_unit_value(self) -> Decimal:
+        """Preço unitário de atacado, com fallback seguro para o varejo."""
+        if self.unit_value_wholesale is not None:
+            return self.unit_value_wholesale
+        return self.unit_value or Decimal("0.00")
+
+    @property
     def line_total_wholesale(self) -> Decimal:
         """Total da linha no preço de atacado.
 
         Cai de volta no preço de varejo (unit_value) quando o atacado do item
         não foi preenchido, para o total de atacado nunca ficar subestimado.
         """
-        unit = self.unit_value_wholesale
-        if unit is None:
-            unit = self.unit_value or Decimal("0.00")
-        return unit * Decimal(self.quantity or 0)
+        return self.wholesale_unit_value * Decimal(self.quantity or 0)
 
 
 class QuoteItemImage(models.Model):

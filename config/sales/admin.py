@@ -6,7 +6,7 @@ from core.admin_helpers import AdminOnly, SellerAccess, _is_admin
 class QuoteItemInline(admin.TabularInline):
     model = QuoteItem
     extra = 1
-    fields = ("supplier", "product_name", "quantity", "unit_value")
+    fields = ("position", "environment", "supplier", "product_name", "quantity", "unit_value")
 
 
 @admin.register(Quote)
@@ -41,8 +41,8 @@ class OrderAdmin(SellerAccess, admin.ModelAdmin):
 
 @admin.register(QuoteItem)
 class QuoteItemAdmin(SellerAccess, admin.ModelAdmin):
-    list_display = ("quote", "product_name", "supplier", "quantity", "unit_value")
-    search_fields = ("product_name", "quote__number")
+    list_display = ("quote", "position", "environment", "product_name", "supplier", "quantity", "unit_value")
+    search_fields = ("product_name", "environment", "quote__number")
 
 
 @admin.register(OrderItem)

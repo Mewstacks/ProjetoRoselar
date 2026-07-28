@@ -1085,8 +1085,12 @@ def report_commissions(request):
     )
 
     # Divisão de comissão: quando existe, valor e faturamento são partidos
-    # igualmente entre os participantes. Guarda o papel junto porque o
-    # financeiro entra na CONTAGEM das partes mas não recebe a dele.
+    # igualmente entre os participantes.
+    #
+    # O papel do usuário não filtra nada aqui: quem faz a venda recebe a
+    # comissão dela, inclusive o financeiro, que também vende. O que o
+    # financeiro ganha por fora (percentual sobre o faturamento da loja) é
+    # outra conta, que não passa por este relatório.
     split_map: dict[int, list] = {}
     for sp in (
         QuoteCommissionSplit.objects
@@ -1095,9 +1099,7 @@ def report_commissions(request):
     ):
         users = list(sp.users.all())
         if users:
-            split_map[sp.quote_id] = [
-                (u.pk, u.get_full_name() or u.username, u.role) for u in users
-            ]
+            split_map[sp.quote_id] = [(u.pk, u.get_full_name() or u.username) for u in users]
 
     seller_totals = defaultdict(
         lambda: {
