@@ -186,6 +186,14 @@ class QuoteQuerySet(models.QuerySet):
 
 class Quote(models.Model):
     number = models.CharField(max_length=20, unique=True, verbose_name="Número")
+    submission_token = models.UUIDField(
+        null=True,
+        blank=True,
+        unique=True,
+        editable=False,
+        verbose_name="Token de envio",
+        help_text="Impede que cliques repetidos criem o mesmo orçamento mais de uma vez.",
+    )
 
     customer = models.ForeignKey(
         "core.Customer",

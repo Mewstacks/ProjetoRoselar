@@ -257,6 +257,9 @@
           <!-- ═══ FORM ═══ -->
           <form method="post" id="quote-form" enctype="multipart/form-data">
             {% csrf_token %}
+            {% if submission_token %}
+              <input type="hidden" name="submission_token" value="{{ submission_token }}">
+            {% endif %}
 
             {% if quote and quote.status == 'CONVERTED' %}
               <div class="alert alert-warning" style="border-radius:12px;margin-bottom:1rem;">
@@ -1569,8 +1572,23 @@
         document.getElementById('form-warnings').classList.add('d-none');
       }
 
+      // Converte apenas valores ainda no formato visual BR. Se a rotina rodar
+      // novamente sobre "7900.00", o valor permanece 7900.00 (e não 790000).
+      function normalizeCurrencyForSubmit(value) {
+        const normalized = String(value || '').trim();
+        if (!normalized.includes(',')) return normalized;
+        return normalized.replace(/\./g, '').replace(',', '.');
+      }
+
       // ── Form validation: required fields + auto-delete blank items ────
-      document.querySelector('form').addEventListener('submit', function(e) {
+      const quoteForm = document.getElementById('quote-form');
+      let quoteFormSubmitting = false;
+      quoteForm.addEventListener('submit', function(e) {
+        if (quoteFormSubmitting) {
+          e.preventDefault();
+          return false;
+        }
+
         hideFormWarning();
         // Clear previous row highlights
         document.querySelectorAll('[data-formset-row]').forEach(r => r.style.border = '');
@@ -1683,17 +1701,36 @@
           const delCb = row.querySelector('input[type="checkbox"][name$="-DELETE"]');
           if (delCb && delCb.checked) return;
           if (row.style.display === 'none') return;
-          const unitValue = row.querySelector('input[name$="-unit_value"]');
-          if (unitValue && unitValue.value) {
-            unitValue.value = unitValue.value.replace(/\./g, '').replace(',', '.');
-          }
+          row.querySelectorAll(
+            'input[name$="-unit_value"], input[name$="-unit_value_wholesale"]'
+          ).forEach(input => {
+            if (input.value) input.value = normalizeCurrencyForSubmit(input.value);
+          });
         });
 
-        // Convert freight_value from display format to decimal
-        const fvInput = document.querySelector('input[name="freight_value"]');
-        if (fvInput && fvInput.value) {
-          fvInput.value = fvInput.value.replace(/\./g, '').replace(',', '.');
+        // Converte os demais campos monetários sem alterar um valor que já
+        // tenha sido normalizado por um envio anterior.
+        quoteForm.querySelectorAll(
+          'input[name="freight_value"], input[name="total_override"]'
+        ).forEach(input => {
+          if (input.value) input.value = normalizeCurrencyForSubmit(input.value);
+        });
+
+        // Preserva qual dos dois botões foi usado antes de desabilitá-los.
+        const submitter = e.submitter;
+        if (submitter && submitter.name) {
+          const actionInput = document.createElement('input');
+          actionInput.type = 'hidden';
+          actionInput.name = submitter.name;
+          actionInput.value = submitter.value;
+          quoteForm.appendChild(actionInput);
         }
+
+        quoteFormSubmitting = true;
+        quoteForm.querySelectorAll('button[type="submit"]').forEach(button => {
+          button.disabled = true;
+          button.setAttribute('aria-busy', 'true');
+        });
       });
 
       // ── On page load: highlight fields with server-side errors + scroll ──

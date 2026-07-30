@@ -23,7 +23,9 @@ def refresh_snapshots(apps, schema_editor):
     from sales.models import Quote
 
     for quote in (
-        Quote.objects.defer("selected_price_tier")
+        # Campos criados depois desta migração não existem ainda ao reconstruir
+        # um banco do zero, embora o modelo Python atual já os conheça.
+        Quote.objects.defer("selected_price_tier", "submission_token")
         .prefetch_related("items")
         .iterator(chunk_size=200)
     ):

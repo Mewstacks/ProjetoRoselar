@@ -1,6 +1,7 @@
 from datetime import date
 from decimal import Decimal
 from io import BytesIO
+from uuid import uuid4
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -11,6 +12,88 @@ from core.models import Supplier
 from sales.models import Order, OrderStatus, PriceTier, Quote, QuoteStatus
 
 User = get_user_model()
+
+
+class QuoteSubmissionRegressionTests(TestCase):
+    """Cliques repetidos não podem duplicar orçamento nem acrescentar zeros."""
+
+    def setUp(self):
+        from core.models import Customer
+
+        self.seller = User.objects.create_user(
+            username="vendedor-envio", password="x", role="SELLER"
+        )
+        self.customer = Customer.objects.create(name="Cliente Envio")
+        self.supplier = Supplier.objects.create(name="Fornecedor Envio")
+        self.client.login(username="vendedor-envio", password="x")
+
+    def _payload(self, token, unit_value):
+        return {
+            "submission_token": str(token),
+            "action": "save",
+            "customer": self.customer.id,
+            "quote_date": "2026-07-30",
+            "sale_date": "",
+            "delivery_days_min": "",
+            "delivery_days_max": "",
+            "freight_value": "0.00",
+            "freight_responsible": "CUSTOMER",
+            "shipping_company": "",
+            "discount_percent": "0",
+            "has_architect": "",
+            "architect": "",
+            "payment_type": "",
+            "payment_installments": "1",
+            "payment_fee_percent": "0",
+            "total_override": "",
+            "dual_pricing": "",
+            "selected_price_tier": PriceTier.RETAIL,
+            "notes": "",
+            "items-TOTAL_FORMS": "1",
+            "items-INITIAL_FORMS": "0",
+            "items-MIN_NUM_FORMS": "0",
+            "items-MAX_NUM_FORMS": "1000",
+            "items-0-supplier": self.supplier.id,
+            "items-0-environment": "Sala",
+            "items-0-product_name": "Produto Teste",
+            "items-0-description": "",
+            "items-0-quantity": "1",
+            "items-0-unit_value": unit_value,
+            "items-0-unit_value_wholesale": "",
+            "items-0-architect_percent": "0",
+        }
+
+    def test_repeated_submission_keeps_first_quote_and_value(self):
+        token = uuid4()
+
+        first = self.client.post(
+            reverse("sales:quote_create"),
+            self._payload(token, "7900.00"),
+        )
+        second = self.client.post(
+            reverse("sales:quote_create"),
+            # Reproduz o valor que a antiga conversão gerava no segundo submit.
+            self._payload(token, "790000"),
+        )
+
+        self.assertEqual(first.status_code, 302)
+        self.assertEqual(second.status_code, 302)
+        self.assertEqual(second.url, first.url)
+        self.assertEqual(Quote.objects.count(), 1)
+        quote = Quote.objects.get()
+        self.assertEqual(quote.items.get().unit_value, Decimal("7900.00"))
+        self.assertEqual(quote.total_value_snapshot, Decimal("7900.00"))
+
+    def test_create_page_renders_a_stable_submission_token(self):
+        response = self.client.get(reverse("sales:quote_create"))
+
+        self.assertEqual(response.status_code, 200)
+        token = response.context["submission_token"]
+        self.assertContains(
+            response,
+            f'name="submission_token" value="{token}"',
+            html=False,
+        )
 
 
 class StandaloneOrderTests(TestCase):

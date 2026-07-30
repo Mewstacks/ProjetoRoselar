@@ -24,7 +24,10 @@ def backfill_commissions(apps, schema_editor):
 
     sold = (
         Quote.objects.filter(status__in=SOLD_STATUSES, commission_value__isnull=True)
-        .defer("selected_price_tier")
+        # Estes campos só são adicionados em migrações posteriores. Como este
+        # backfill usa o modelo Python atual, precisam ficar fora do SELECT ao
+        # reconstruir um banco do zero.
+        .defer("selected_price_tier", "submission_token")
         .prefetch_related("items")
     )
 

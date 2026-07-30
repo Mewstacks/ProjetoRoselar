@@ -9,12 +9,12 @@ from datetime import date as date_type, time as time_type, timedelta
 from decimal import Decimal
 from io import BytesIO
 from urllib.parse import quote as url_quote
+from uuid import UUID, uuid4
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
-from django.db import transaction
-from django.db import models
+from django.db import IntegrityError, models, transaction
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -527,52 +527,116 @@ def quote_list(request: HttpRequest) -> HttpResponse:
 @login_required
 @require_http_methods(["GET", "POST"])
 def quote_create(request: HttpRequest) -> HttpResponse:
+    raw_submission_token = (
+        request.POST.get("submission_token", "")
+        if request.method == "POST"
+        else ""
+    )
+    try:
+        submission_token = UUID(raw_submission_token) if raw_submission_token else uuid4()
+    except (TypeError, ValueError, AttributeError):
+        submission_token = uuid4()
+
+    def redirect_after_create(quote: Quote) -> HttpResponse:
+        if request.POST.get("action", "save") == "next_step":
+            return redirect("sales:quote_simulate", quote_id=quote.id)
+        return redirect("sales:quote_detail", quote_id=quote.id)
+
     if request.method == "POST":
+        # A mesma tela pode enviar mais de um POST antes de o primeiro redirect
+        # chegar ao navegador. O token torna esses envios idempotentes.
+        existing_quote = Quote.objects.filter(
+            submission_token=submission_token,
+            seller=request.user,
+        ).first()
+        if existing_quote is not None:
+            messages.info(
+                request,
+                f"O envio repetido foi ignorado; o orçamento {existing_quote.number} já foi criado.",
+            )
+            return redirect_after_create(existing_quote)
+
+        # Um token de outro usuário nunca deve permitir acesso ao orçamento dele.
+        if Quote.objects.filter(submission_token=submission_token).exists():
+            submission_token = uuid4()
+
         form = QuoteForm(request.POST)
         formset = QuoteItemFormSet(request.POST, request.FILES)
 
         if form.is_valid() and formset.is_valid():
-            with transaction.atomic():
-                quote: Quote = form.save(commit=False)
-                quote.seller = request.user
-                quote.status = QuoteStatus.DRAFT
-                if not quote.quote_date:
-                    quote.quote_date = timezone.localdate()
-                quote.number = generate_next_quote_number()
-                
-                if quote.discount_percent is None:
-                    quote.discount_percent = Decimal("0.0")
-                if quote.payment_installments is None:
-                    quote.payment_installments = 1
-                if quote.payment_fee_percent is None:
-                    quote.payment_fee_percent = Decimal("0.0")
-                
-                if quote.freight_responsible == FreightResponsible.CUSTOMER:
-                    quote.freight_value = Decimal("0.00")
-                
-                discount_percent = quote.discount_percent or Decimal("0")
-                if discount_percent > 15:
-                    authorized_by_username = request.POST.get('discount_authorized_by')
-                    if authorized_by_username:
-                        from django.contrib.auth import get_user_model
-                        User = get_user_model()
-                        try:
-                            auth_user = User.objects.get(username=authorized_by_username, is_staff=True)
-                            quote.discount_authorized_by = auth_user
-                            quote.discount_authorized_at = timezone.now()
-                        except User.DoesNotExist:
-                            messages.error(request, "Usuário autorizador não encontrado.")
-                            return render(request, "sales/quote_form.html", {"form": form, "formset": formset})
-                    else:
-                        messages.error(request, "Desconto acima de 15% requer autorização.")
-                        return render(request, "sales/quote_form.html", {"form": form, "formset": formset})
-                
-                quote.save()
+            try:
+                with transaction.atomic():
+                    quote: Quote = form.save(commit=False)
+                    quote.seller = request.user
+                    quote.status = QuoteStatus.DRAFT
+                    quote.submission_token = submission_token
+                    if not quote.quote_date:
+                        quote.quote_date = timezone.localdate()
+                    quote.number = generate_next_quote_number()
 
-                formset.instance = quote
-                formset.save()
-                _persist_item_order_from_formset(formset)
-                _persist_item_images_from_formset(formset)
+                    if quote.discount_percent is None:
+                        quote.discount_percent = Decimal("0.0")
+                    if quote.payment_installments is None:
+                        quote.payment_installments = 1
+                    if quote.payment_fee_percent is None:
+                        quote.payment_fee_percent = Decimal("0.0")
+
+                    if quote.freight_responsible == FreightResponsible.CUSTOMER:
+                        quote.freight_value = Decimal("0.00")
+
+                    discount_percent = quote.discount_percent or Decimal("0")
+                    if discount_percent > 15:
+                        authorized_by_username = request.POST.get('discount_authorized_by')
+                        if authorized_by_username:
+                            from django.contrib.auth import get_user_model
+                            User = get_user_model()
+                            try:
+                                auth_user = User.objects.get(username=authorized_by_username, is_staff=True)
+                                quote.discount_authorized_by = auth_user
+                                quote.discount_authorized_at = timezone.now()
+                            except User.DoesNotExist:
+                                messages.error(request, "Usuário autorizador não encontrado.")
+                                return render(
+                                    request,
+                                    "sales/quote_form.html",
+                                    {
+                                        "form": form,
+                                        "formset": formset,
+                                        "submission_token": submission_token,
+                                    },
+                                )
+                        else:
+                            messages.error(request, "Desconto acima de 15% requer autorização.")
+                            return render(
+                                request,
+                                "sales/quote_form.html",
+                                {
+                                    "form": form,
+                                    "formset": formset,
+                                    "submission_token": submission_token,
+                                },
+                            )
+
+                    quote.save()
+
+                    formset.instance = quote
+                    formset.save()
+                    _persist_item_order_from_formset(formset)
+                    _persist_item_images_from_formset(formset)
+            except IntegrityError:
+                # Corrida real entre dois POSTs simultâneos: a restrição UNIQUE
+                # deixa apenas um vencer. O perdedor reutiliza o resultado.
+                existing_quote = Quote.objects.filter(
+                    submission_token=submission_token,
+                    seller=request.user,
+                ).first()
+                if existing_quote is None:
+                    raise
+                messages.info(
+                    request,
+                    f"O envio repetido foi ignorado; o orçamento {existing_quote.number} já foi criado.",
+                )
+                return redirect_after_create(existing_quote)
 
             from core.models import AuditLog, AuditAction
             AuditLog.log(request.user, AuditAction.CREATE_QUOTE,
@@ -580,12 +644,7 @@ def quote_create(request: HttpRequest) -> HttpResponse:
                          ip_address=request.META.get('REMOTE_ADDR'))
 
             messages.success(request, f"Orçamento {quote.number} criado.")
-            
-            action = request.POST.get('action', 'save')
-            if action == 'next_step':
-                return redirect("sales:quote_simulate", quote_id=quote.id)
-            
-            return redirect("sales:quote_detail", quote_id=quote.id)
+            return redirect_after_create(quote)
         else:
             messages.error(request, "Corrija os campos inválidos.")
     else:
@@ -600,7 +659,11 @@ def quote_create(request: HttpRequest) -> HttpResponse:
     return render(
         request,
         "sales/quote_form.html",
-        {"form": form, "formset": formset},
+        {
+            "form": form,
+            "formset": formset,
+            "submission_token": submission_token,
+        },
     )
 
 @login_required
