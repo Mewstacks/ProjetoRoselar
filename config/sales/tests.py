@@ -512,6 +512,133 @@ class SimulationSuggestionTests(TestCase):
         self.assertEqual(ctx["suggested_increase"], Decimal("0"))
 
 
+class TotalOverrideSimulationTests(TestCase):
+    """Preço Final ao Cliente digitado tem que valer no motor de margem.
+
+    O campo mandava só em `apply_client_rounding`; o simulador, a comissão e o
+    "Total para o Cliente" continuavam derivando o valor dos produtos, então o
+    vendedor digitava 2300 e via 2500 na aba de simulação.
+    """
+
+    def setUp(self):
+        from core.models import Customer, PaymentTariff
+
+        PaymentTariff.objects.all().delete()
+        PaymentTariff.objects.create(
+            payment_type="PIX", installments=1, fee_percent=Decimal("0.00")
+        )
+        self.seller = User.objects.create_user(username="v", password="x", role="SELLER")
+        self.customer = Customer.objects.create(name="Cliente")
+        self.quote = Quote.objects.create(
+            number="ORC-9100", customer=self.customer, seller=self.seller,
+            status=QuoteStatus.DRAFT, freight_responsible="CUSTOMER",
+            payment_type="PIX", payment_installments=1,
+        )
+        self.quote.items.create(
+            product_name="Sofá", quantity=1, unit_value=Decimal("2500.00"),
+        )
+
+    def _sim(self, **kwargs):
+        from sales.views import _build_simulation_context
+
+        params = dict(
+            subtotal=Decimal("2500"),
+            freight_value=Decimal("0"),
+            sim_payment_type="PIX",
+            sim_has_architect=False,
+            sim_discount=Decimal("0"),
+            price_increase_pct=Decimal("0"),
+            sim_installments=1,
+        )
+        params.update(kwargs)
+        return _build_simulation_context(**params)
+
+    def test_total_para_o_cliente_usa_o_preco_digitado(self):
+        ctx = self._sim(total_override=Decimal("2300"))
+        self.assertEqual(ctx["final_total"], Decimal("2300"))
+        self.assertTrue(ctx["total_override_active"])
+        self.assertEqual(ctx["override_adjust_value"], Decimal("-200"))
+
+    def test_sem_override_o_motor_nao_muda(self):
+        self.assertEqual(self._sim()["final_total"], Decimal("2500"))
+
+    def test_margem_cai_quando_o_preco_digitado_e_menor(self):
+        # Custo é 88% de 2500 = 2200; vender a 2300 deixa 100 de margem, contra
+        # os 300 do budget cheio de 12%.
+        self.assertEqual(self._sim()["margin_balance"], Decimal("300.00"))
+        self.assertEqual(
+            self._sim(total_override=Decimal("2300"))["margin_balance"],
+            Decimal("100.00"),
+        )
+
+    def test_preco_digitado_abaixo_do_custo_bloqueia(self):
+        ctx = self._sim(total_override=Decimal("2000"))
+        self.assertLess(ctx["margin_balance"], 0)
+        self.assertTrue(ctx["controls_blocked"])
+
+    def test_frete_sai_do_preco_digitado_e_nao_soma_por_cima(self):
+        ctx = self._sim(freight_value=Decimal("300"), total_override=Decimal("2300"))
+        self.assertEqual(ctx["final_total"], Decimal("2300"))
+        # Produtos = 2300 − 300 de frete; margem = 2000 − 88% de 2500.
+        self.assertEqual(ctx["margin_balance"], Decimal("-200.00"))
+
+    def test_comissao_incide_sobre_o_que_o_cliente_paga(self):
+        cheio = self._sim()
+        com_override = self._sim(total_override=Decimal("2300"))
+        self.assertLess(
+            com_override["seller_commission_value"],
+            cheio["seller_commission_value"],
+        )
+
+    def test_acrescimo_nao_e_sugerido_com_preco_travado(self):
+        # Subir % não move um preço que já está fixado; sugerir seria mentira.
+        ctx = self._sim(total_override=Decimal("2000"))
+        self.assertTrue(ctx["controls_blocked"])
+        self.assertEqual(ctx["min_increase_to_unblock"], Decimal("0"))
+
+    def test_simulate_quote_bate_com_o_total_do_detalhe(self):
+        from sales.margin import simulate_quote
+
+        self.quote.total_override = Decimal("2300.00")
+        self.quote.save(update_fields=["total_override"])
+        ctx = simulate_quote(self.quote)
+        self.assertEqual(ctx["final_total"], self.quote.calculate_rounded_total())
+        self.assertEqual(ctx["final_total"], Decimal("2300.00"))
+
+    def test_atacado_ignora_o_preco_digitado_do_varejo(self):
+        from sales.margin import simulate_quote
+        from sales.models import PriceTier
+
+        self.quote.items.update(unit_value_wholesale=Decimal("1900.00"))
+        self.quote.dual_pricing = True
+        self.quote.selected_price_tier = PriceTier.WHOLESALE
+        self.quote.total_override = Decimal("2300.00")
+        self.quote.save(update_fields=[
+            "dual_pricing", "selected_price_tier", "total_override",
+        ])
+        ctx = simulate_quote(self.quote)
+        self.assertFalse(ctx["total_override_active"])
+        self.assertEqual(ctx["final_total"], Decimal("1900.00"))
+
+
+class BrlParsingTests(TestCase):
+    """Milhar sem centavos não pode virar centavo."""
+
+    def test_ponto_de_milhar_sem_virgula(self):
+        from sales.forms import parse_brl_decimal
+
+        self.assertEqual(parse_brl_decimal("2.300"), Decimal("2300"))
+        self.assertEqual(parse_brl_decimal("1.234.567"), Decimal("1234567"))
+
+    def test_formatos_ja_suportados_continuam_iguais(self):
+        from sales.forms import parse_brl_decimal
+
+        self.assertEqual(parse_brl_decimal("2.300,00"), Decimal("2300.00"))
+        self.assertEqual(parse_brl_decimal("2300,50"), Decimal("2300.50"))
+        self.assertEqual(parse_brl_decimal("2300.00"), Decimal("2300.00"))
+        self.assertEqual(parse_brl_decimal("2300"), Decimal("2300"))
+
+
 class OrderEditFormsetTests(TestCase):
     """Regressão: a linha extra vazia do formset não pode travar a edição.
 

@@ -20,12 +20,19 @@ def _run_simulation(
     down_payment: Decimal,
     has_architect: bool,
     payment_methods: list[dict],
+    total_override: Decimal | None = None,
 ) -> dict:
     """Motor de Margem Unificado.
 
     Recebe freight_value JÁ com markup por dentro (calculado em _build_simulation_context).
     Comissão interpolada linearmente: [2%, 5%] para PIX/Dinheiro, [2%, 4%] para cartão e demais.
     Status: VERMELHO se MLD<0, AMARELO se 0≤MLD<2, VERDE se MLD≥2.
+
+    `total_override` é o "Preço Final ao Cliente" digitado no orçamento. Quando
+    presente, ele É o valor da venda: o preço dos produtos deixa de ser derivado
+    de acréscimo/desconto e passa a ser o override menos o frete. O restante do
+    motor (juros, arquiteto, comissão, entrada) continua igual, agora sobre o
+    valor que o cliente realmente paga.
     """
     from decimal import ROUND_HALF_UP
     subtotal      = Decimal(str(subtotal or 0))
@@ -33,6 +40,8 @@ def _run_simulation(
     discount_pct  = Decimal(str(discount_pct or 0))
     markup_pct    = Decimal(str(markup_pct or 0))
     down_payment  = Decimal(str(down_payment or 0))
+    if total_override is not None:
+        total_override = max(Decimal('0'), Decimal(str(total_override)))
 
     if subtotal <= 0:
         return {
@@ -51,10 +60,16 @@ def _run_simulation(
         }
 
     # 1. Valores Base (freight já chega com markup por dentro)
-    valor_produtos_ajustado = subtotal * (
-        Decimal('1') + (markup_pct / Decimal('100')) - (discount_pct / Decimal('100'))
-    )
-    valor_total_venda = valor_produtos_ajustado + freight_value
+    if total_override is not None:
+        # Preço final digitado manda: o produto vale o que sobra do total depois
+        # do frete. Acréscimo e desconto viram apenas informação de tela.
+        valor_total_venda       = total_override
+        valor_produtos_ajustado = valor_total_venda - freight_value
+    else:
+        valor_produtos_ajustado = subtotal * (
+            Decimal('1') + (markup_pct / Decimal('100')) - (discount_pct / Decimal('100'))
+        )
+        valor_total_venda = valor_produtos_ajustado + freight_value
 
     entrada_efetiva   = min(max(Decimal('0'), down_payment), max(Decimal('0'), valor_total_venda))
     valor_a_financiar = max(Decimal('0'), valor_total_venda - entrada_efetiva)
@@ -103,12 +118,15 @@ def _run_simulation(
         max_parcelas     = 1
 
     # 4. Motor de Margem
-    budget_loja       = subtotal * Decimal('0.12')
-    gordura_acrescimo = subtotal * (markup_pct  / Decimal('100'))
-    queima_desconto   = subtotal * (discount_pct / Decimal('100'))
+    queima_desconto = subtotal * (discount_pct / Decimal('100'))
 
-    custos_operacionais = (juros_totais_banco - juros_so_do_frete) + custo_arquiteto + queima_desconto
-    lucro_sobra         = (budget_loja + gordura_acrescimo) - custos_operacionais
+    # Margem bruta = preço de venda dos produtos menos o custo (88% do subtotal,
+    # já que 12% é o budget da loja). Escrita nesta forma — e não como
+    # budget + acréscimo − desconto — porque é algebricamente idêntica quando o
+    # preço vem de % e continua correta quando ele vem do preço final digitado.
+    margem_bruta        = valor_produtos_ajustado - (subtotal * Decimal('0.88'))
+    custos_operacionais = (juros_totais_banco - juros_so_do_frete) + custo_arquiteto
+    lucro_sobra         = margem_bruta - custos_operacionais
     mld_pct = (lucro_sobra / subtotal) * Decimal('100') if subtotal > Decimal('0') else Decimal('0')
 
     # 5. Comissão por tipo de pagamento (conforme LOGICA_SIMULADOR.txt)
@@ -197,6 +215,7 @@ def _build_simulation_context(
     sim_split_amount: Decimal | None = None,
     price_increase_pct_2: Decimal = Decimal("0"),
     down_payment_value: Decimal | None = None,
+    total_override: Decimal | None = None,
 ) -> dict:
     """Wrapper que organiza os inputs do request e injeta no Motor de Margem.
 
@@ -225,6 +244,8 @@ def _build_simulation_context(
     price_increase_pct_2 = max(Decimal("0"), min(Decimal(str(price_increase_pct_2 or 0)), MAX_PRICE_INCREASE))
     sim_installments   = max(1, min(int(sim_installments or 1), 18))
     sim_installments_2 = max(1, min(int(sim_installments_2 or 1), 18))
+    if total_override is not None:
+        total_override = max(Decimal("0"), Decimal(str(total_override)))
 
     split_mode = bool(sim_payment_type_2)
 
@@ -258,7 +279,12 @@ def _build_simulation_context(
         freight_cobrado = freight_value
 
     # ---- Total temporário baseado no frete JÁ com markup ----
+    # Com preço final digitado o total não depende mais do acréscimo: qualquer
+    # `pi` devolve o mesmo valor, o que também zera as sugestões de acréscimo
+    # (subir % não muda um preço que já está fixado).
     def _total_for_markup(pi: Decimal) -> Decimal:
+        if total_override is not None:
+            return total_override
         adj = subtotal * (Decimal("1") + pi / Decimal("100") - sim_discount / Decimal("100"))
         return max(Decimal("0"), adj + freight_cobrado)
 
@@ -316,6 +342,7 @@ def _build_simulation_context(
         down_payment=dp_capped,
         has_architect=sim_has_architect,
         payment_methods=payment_methods,
+        total_override=total_override,
     )
 
     # ---- Entrada mínima para desbloquear (MLD >= 0) ----
@@ -328,12 +355,12 @@ def _build_simulation_context(
             for m in payment_methods
         )
         if taxa_efetiva > 0:
-            _adj = subtotal * (Decimal("1") + price_increase_pct / Decimal("100") - sim_discount / Decimal("100"))
-            _budget   = subtotal * Decimal("0.12")
-            _gordura  = subtotal * (price_increase_pct / Decimal("100"))
-            _queima   = subtotal * (sim_discount / Decimal("100"))
+            # Mesma álgebra do motor: preço dos produtos = total − frete, e a
+            # margem bruta é esse preço menos 88% do subtotal. Vale com e sem
+            # preço final digitado.
+            _adj = valor_temporario_total - freight_cobrado
             _arquiteto = (_adj * (Decimal("1") - Decimal("0.12"))) * Decimal("0.05") if sim_has_architect else Decimal("0")
-            _margem_fixa = _budget + _gordura - _arquiteto - _queima
+            _margem_fixa = _adj - (subtotal * Decimal("0.88")) - _arquiteto
             if _margem_fixa > 0 and _adj > 0:
                 # Após o fix de juros_so_do_frete, só o juro proporcional aos produtos
                 # pesa na margem da loja. Escala a taxa efetiva pelo fator produto/total.
@@ -345,7 +372,14 @@ def _build_simulation_context(
 
     # ---- Valores derivados para os templates ----
     adj_subtotal      = resultado['totals']['adj_subtotal']
-    total_before_disc = adj_subtotal + freight_cobrado
+    # As linhas "Ajuste de Preço" e "Total antes do desconto" descrevem como o
+    # preço FOI formado por percentual; com preço final digitado elas continuam
+    # mostrando essa formação e a diferença até o valor cobrado aparece numa
+    # linha própria (override_adjust_value).
+    adj_pre_override  = subtotal * (
+        Decimal("1") + price_increase_pct / Decimal("100") - sim_discount / Decimal("100")
+    )
+    total_before_disc = adj_pre_override + freight_cobrado
     discount_value    = resultado['totals']['discount_value']
     final_total       = resultado['totals']['final_total']
     down_payment_used = resultado['totals']['down_payment']
@@ -472,6 +506,7 @@ def _build_simulation_context(
             down_payment=Decimal("0") if split_mode else min(dp_input, total),
             has_architect=sim_has_architect,
             payment_methods=methods,
+            total_override=total_override,
         )
         return (r['costs']['margin_balance'] / subtotal) * Decimal("100")
 
@@ -559,8 +594,11 @@ def _build_simulation_context(
 
         # Totais calculados
         'adj_subtotal':             adj_subtotal,
-        'price_increase_value':     adj_subtotal - subtotal,
+        'price_increase_value':     adj_pre_override - subtotal,
         'total_before_discount':    total_before_disc,
+        'total_override_active':    total_override is not None,
+        'total_override_value':     total_override,
+        'override_adjust_value':    final_total - total_before_disc,
         'discount_value':           discount_value,
         'total_after_discount':     final_total,
         'final_total':               final_total,
@@ -681,6 +719,13 @@ def simulate_quote(quote) -> dict:
         sim_split_amount=quote.payment_split_amount,
         price_increase_pct_2=Decimal("0"),
         down_payment_value=quote.down_payment_value or None,
+        # O preço final digitado se refere só ao varejo (mesma regra de
+        # Quote.calculate_rounded_total_wholesale, que o ignora).
+        total_override=(
+            quote.__dict__.get("total_override")
+            if selected_tier == PriceTier.RETAIL
+            else None
+        ),
     )
 
 

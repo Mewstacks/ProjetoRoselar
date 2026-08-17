@@ -510,6 +510,15 @@
                 </div>
                 {% endif %}
 
+                {% if total_override_active %}
+                <div class="r-line">
+                  <span class="r-l"><i class="fa-solid fa-pen me-1" style="font-size:.72rem;"></i>Preço final ao cliente (digitado no orçamento)</span>
+                  <strong style="color:{% if override_adjust_value < 0 %}var(--red){% else %}var(--green){% endif %};">
+                    {% if override_adjust_value < 0 %}– R$ {{ override_adjust_value|floatformat:2|cut:"-" }}{% else %}+ R$ {{ override_adjust_value|floatformat:2 }}{% endif %}
+                  </strong>
+                </div>
+                {% endif %}
+
                 {% if down_payment_value > 0 %}
                 <!-- Down payment breakdown -->
                 <div style="margin-top:.5rem;border-top:1px dashed #c4b5fd;padding-top:.5rem;">

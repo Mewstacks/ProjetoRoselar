@@ -444,7 +444,7 @@
             </div>
             {% if value_breakdown.has_rounding %}
               <div class="r-line">
-                <span class="r-l">Arredondamento</span>
+                <span class="r-l">{% if value_breakdown.has_override %}Preço final ao cliente (digitado){% else %}Arredondamento{% endif %}</span>
                 <span style="font-weight:700;color:{% if value_breakdown.rounding_diff < 0 %}var(--red){% else %}var(--blue){% endif %};">
                   {% if value_breakdown.rounding_diff < 0 %}− R$ {{ value_breakdown.rounding_diff|floatformat:2|cut:"-" }}{% else %}+ R$ {{ value_breakdown.rounding_diff|floatformat:2 }}{% endif %}
                 </span>

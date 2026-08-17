@@ -20,11 +20,16 @@ def parse_brl_decimal(raw, field_label="valor"):
     Levanta forms.ValidationError se vazio ou inválido.
     """
     from decimal import Decimal, InvalidOperation
+    import re
     if raw is None or str(raw).strip() == "":
         raise forms.ValidationError(f"Informe o {field_label}.")
     raw = str(raw).strip()
     if ',' in raw:
         raw = raw.replace('.', '').replace(',', '.')
+    elif re.fullmatch(r"\d{1,3}(\.\d{3})+", raw):
+        # "2.300" sem centavos é milhar em pt-BR, nunca 2,30. Sem esta guarda o
+        # Decimal lê o ponto como separador decimal e grava R$ 2,30.
+        raw = raw.replace('.', '')
     try:
         return Decimal(raw)
     except InvalidOperation:

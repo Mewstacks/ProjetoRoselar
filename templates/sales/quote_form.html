@@ -1549,17 +1549,20 @@
         syncWholesaleColumns();
       })();
 
-      // Apply mask to freight_value input
-      const freightInput = document.querySelector('input[name="freight_value"]');
-      if (freightInput) {
-        if (freightInput.value && freightInput.value.includes('.')) {
-          const parts = freightInput.value.split('.');
+      // Apply mask to the remaining money inputs (frete e preço final ao cliente).
+      // Sem a máscara, digitar "2.300" chegava ao servidor como "2.300" e o
+      // parser BR — que só troca separadores quando há vírgula — gravava R$ 2,30.
+      document.querySelectorAll(
+        'input[name="freight_value"], input[name="total_override"]'
+      ).forEach(moneyInput => {
+        if (moneyInput.value && moneyInput.value.includes('.')) {
+          const parts = moneyInput.value.split('.');
           const intPart = parts[0].replace(/^0+/, '') || '0';
           const decPart = (parts[1] || '00').padEnd(2, '0').slice(0, 2);
-          freightInput.value = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + decPart;
+          moneyInput.value = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + decPart;
         }
-        applyCurrencyMask(freightInput);
-      }
+        applyCurrencyMask(moneyInput);
+      });
 
       function showFormWarning(msg) {
         const box = document.getElementById('form-warnings');
