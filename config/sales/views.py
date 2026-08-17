@@ -1269,6 +1269,11 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
 
     config = ProposalConfig.get_config()
 
+    # Modo "orçamento de opções" (?opcoes=1): o cliente ainda vai escolher
+    # entre os itens, então nada é somado — sem desconto, sem planos de
+    # pagamento e sem barra de total. Decisão caso a caso, no download.
+    options_mode = request.GET.get("opcoes") == "1"
+
     buffer = BytesIO()
     page_w, page_h = A4
     c = pdf_canvas.Canvas(buffer, pagesize=A4)
@@ -1379,13 +1384,16 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
     ENV_H    = 32
     IMG_SZ   = 128
     PAYMENT_PLANS = quote.get_payment_plans()
-    FOOTER_H = 250
-    if quote.dual_pricing:
-        FOOTER_H += 70
-    if any(plan["split_active"] for plan in PAYMENT_PLANS):
-        FOOTER_H += 55 if quote.dual_pricing else 25
-    if any(plan["down_payment"] > 0 for plan in PAYMENT_PLANS):
-        FOOTER_H += 35
+    if options_mode:
+        FOOTER_H = 160
+    else:
+        FOOTER_H = 250
+        if quote.dual_pricing:
+            FOOTER_H += 70
+        if any(plan["split_active"] for plan in PAYMENT_PLANS):
+            FOOTER_H += 55 if quote.dual_pricing else 25
+        if any(plan["down_payment"] > 0 for plan in PAYMENT_PLANS):
+            FOOTER_H += 35
 
     items = list(
         quote.items.prefetch_related('images').order_by('position', 'id')
@@ -1544,8 +1552,9 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
 
         ty = y_top - 24
 
+        section_title = "OPÇÕES PARA SUA ESCOLHA" if options_mode else "PROPOSTA ESPECIAL"
         c.setFillColor(NAVY)
-        _draw_spaced("PROPOSTA ESPECIAL", MX, ty, FONT_BOLD, 13, cs=3)
+        _draw_spaced(section_title, MX, ty, FONT_BOLD, 13, cs=3)
         c.setFillColor(GRAY)
         c.setFont(FONT_ITALIC, 8)
         c.drawRightString(MX + CW, ty + 1, "Orçamento válido por 03 dias")
@@ -1565,6 +1574,41 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
             ty -= 13
 
         ty -= 12
+
+        if options_mode:
+            # ── Orçamento de opções: cliente escolhe, nada é somado ──────
+            # Frete repassado ficaria invisível sem a barra de total, então
+            # vira linha informativa própria.
+            if quote.billable_freight > 0:
+                c.setFillColor(GRAY)
+                c.setFont(FONT_REG, 8.5)
+                c.drawString(
+                    MX, ty,
+                    f"Frete: {_fmt_brl(quote.billable_freight)} "
+                    "(não incluso nos valores dos produtos).",
+                )
+                ty -= 16
+            note_lines = _wrap(
+                "Os valores apresentados são individuais, por produto, e não "
+                "estão somados. Escolha as opções desejadas e retornaremos "
+                "com a proposta final e as condições de pagamento.",
+                FONT_REG, 8.5, CW - 32,
+            )
+            box_h = 30 + 12 * len(note_lines)
+            box_y = ty - box_h
+            c.setFillColor(colors.HexColor('#F1F1F1'))
+            c.roundRect(MX, box_y, CW, box_h, 6, fill=1, stroke=0)
+            c.setFillColor(NAVY)
+            c.setFont(FONT_BOLD, 10)
+            c.drawString(MX + 16, box_y + box_h - 20,
+                         "Orçamento de opções — valores individuais por produto")
+            c.setFillColor(GRAY)
+            c.setFont(FONT_REG, 8.5)
+            ny = box_y + box_h - 34
+            for line in note_lines:
+                c.drawString(MX + 16, ny, line)
+                ny -= 12
+            return
 
         # ── Cálculo dos valores ──────────────────────────────────────────
         # Fonte única de verdade: o total ao cliente é EXATAMENTE o snapshot
@@ -1730,8 +1774,9 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
     buffer.close()
 
     response = HttpResponse(pdf, content_type='application/pdf')
+    suffix = '_opcoes' if options_mode else ''
     response['Content-Disposition'] = _safe_content_disposition(
-        f'proposta_{quote.number}.pdf'
+        f'proposta_{quote.number}{suffix}.pdf'
     )
     return response
 

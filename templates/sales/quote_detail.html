@@ -342,6 +342,10 @@
               <a href="{% url 'sales:quote_pdf_client' quote.id %}" class="btn-a primary" target="_blank">
                 <i class="fa-solid fa-file-pdf"></i>PDF Cliente
               </a>
+              <a href="{% url 'sales:quote_pdf_client' quote.id %}?opcoes=1" class="btn-a secondary" target="_blank"
+                 title="Orçamento de opções: valores por item, sem somar o total. Para cliente que ainda vai escolher.">
+                <i class="fa-solid fa-list-check"></i>PDF Opções
+              </a>
               {% if can_view_supplier_pdf %}
               <a href="{% url 'sales:quote_pdf_supplier' quote.id %}" class="btn-a info" target="_blank">
                 <i class="fa-solid fa-file-pdf"></i>PDF Fornecedor

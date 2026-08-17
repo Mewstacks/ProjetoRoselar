@@ -762,6 +762,34 @@ class DualPricingTests(TestCase):
         self.assertIn("Entrada no PIX", text)
         self.assertIn("Restante no Boleto para 30 dias", text)
 
+    def test_client_pdf_options_mode_hides_totals_and_payment_plans(self):
+        from pypdf import PdfReader
+
+        self.client.login(username="admin", password="x")
+
+        resp = self.client.get(
+            reverse("sales:quote_pdf_client", args=[self.quote.id]) + "?opcoes=1"
+        )
+        self.assertIn("_opcoes.pdf", resp["Content-Disposition"])
+        text = "\n".join(
+            page.extract_text() or ""
+            for page in PdfReader(BytesIO(resp.content)).pages
+        )
+
+        # Aviso de opções presente; nada de total somado nem plano de pagamento.
+        self.assertIn("Orçamento de opções", text)
+        self.assertNotIn("Valor do investimento", text)
+        self.assertNotIn("COMO PAGAR", text)
+
+        # PDF normal segue com o total somado.
+        resp = self.client.get(reverse("sales:quote_pdf_client", args=[self.quote.id]))
+        normal_text = "\n".join(
+            page.extract_text() or ""
+            for page in PdfReader(BytesIO(resp.content)).pages
+        )
+        self.assertIn("Valor do investimento", normal_text)
+        self.assertNotIn("Orçamento de opções", normal_text)
+
     def test_items_are_ordered_by_persisted_position(self):
         sofa, puff = list(self.quote.items.order_by("id"))
         sofa.position = 1
