@@ -582,6 +582,15 @@
                   <span class="r-l">Modalidade fechada</span>
                   <span style="font-weight:800;color:var(--brand);">{{ value_breakdown.selected_price_tier_label }}</span>
                 </div>
+                <div class="r-line" style="margin-bottom:.35rem;">
+                  <span class="r-l" style="font-size:.8rem;color:var(--muted);">
+                    Modalidade não fechada —
+                    {% if value_breakdown.selected_price_tier == 'WHOLESALE' %}Varejo{% else %}Atacado (sem desconto){% endif %}
+                  </span>
+                  <span style="font-weight:700;color:var(--muted);">
+                    R$ {% if value_breakdown.selected_price_tier == 'WHOLESALE' %}{{ value_breakdown.rounded_total_retail|floatformat:2 }}{% else %}{{ value_breakdown.rounded_total_wholesale|floatformat:2 }}{% endif %}
+                  </span>
+                </div>
               {% endif %}
               <div class="r-line">
                 <span class="r-l">Valor original dos produtos{% if value_breakdown.dual_pricing %} — {{ value_breakdown.selected_price_tier_label }}{% endif %}</span>
@@ -611,6 +620,14 @@
                 <div class="r-line">
                   <span class="r-l">Taxa de pagamento ({{ value_breakdown.payment_fee_pct|floatformat:2 }}%) — custo da loja</span>
                   <span style="font-weight:700;color:var(--muted);">R$ {{ value_breakdown.payment_fee|floatformat:2 }}</span>
+                </div>
+              {% endif %}
+              {% if value_breakdown.has_rounding %}
+                <div class="r-line">
+                  <span class="r-l">{% if value_breakdown.has_override %}Preço final ao cliente (digitado){% else %}Arredondamento{% endif %}</span>
+                  <span style="font-weight:700;color:{% if value_breakdown.rounding_diff < 0 %}var(--red){% else %}var(--blue){% endif %};">
+                    {% if value_breakdown.rounding_diff < 0 %}− R$ {{ value_breakdown.rounding_diff|floatformat:2|cut:"-" }}{% else %}+ R$ {{ value_breakdown.rounding_diff|floatformat:2 }}{% endif %}
+                  </span>
                 </div>
               {% endif %}
               <div class="r-line" style="border-top:2px solid var(--border);margin-top:.3rem;padding-top:.6rem;">
