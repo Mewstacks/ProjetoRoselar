@@ -722,8 +722,9 @@ def simulate_quote(quote) -> dict:
         # O preço final digitado se refere só ao varejo (mesma regra de
         # Quote.calculate_rounded_total_wholesale, que o ignora).
         total_override=(
-            quote.__dict__.get("total_override")
+            quote.effective_total_override
             if selected_tier == PriceTier.RETAIL
+            and "total_override" in quote.__dict__
             else None
         ),
     )

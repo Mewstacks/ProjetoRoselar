@@ -621,6 +621,67 @@ class TotalOverrideSimulationTests(TestCase):
         self.assertEqual(ctx["final_total"], Decimal("1900.00"))
 
 
+class ZeroTotalOverrideTests(TestCase):
+    """Preço final gravado como 0,00 zerava o total de varejo.
+
+    `apply_client_rounding` testava só `is not None`; um "0" solto no campo
+    (que a máscara vira "0,00") virava o preço da venda e o orçamento passava a
+    valer R$ 0,00 no detalhe, no PDF, no pedido e no snapshot dos relatórios.
+    """
+
+    def setUp(self):
+        from core.models import Customer, PaymentTariff
+
+        PaymentTariff.objects.all().delete()
+        PaymentTariff.objects.create(payment_type="PIX", installments=1,
+                                     fee_percent=Decimal("0.00"))
+        self.seller = User.objects.create_user(username="v", password="x", role="SELLER")
+        cust = Customer.objects.create(name="Cliente")
+        self.quote = Quote.objects.create(
+            number="ORC-9200", customer=cust, seller=self.seller,
+            status=QuoteStatus.DRAFT, freight_responsible="CUSTOMER",
+            payment_type="PIX", payment_installments=1,
+        )
+        self.quote.items.create(product_name="Sofá", quantity=1,
+                                unit_value=Decimal("2500.00"))
+
+    def _set_override(self, value):
+        self.quote.total_override = value
+        self.quote.save(update_fields=["total_override"])
+        self.quote.refresh_from_db()
+
+    def test_zero_nao_e_preco(self):
+        self._set_override(Decimal("0.00"))
+        self.assertIsNone(self.quote.effective_total_override)
+        self.assertEqual(self.quote.calculate_rounded_total(), Decimal("2500.00"))
+
+    def test_zero_nao_zera_o_snapshot(self):
+        self._set_override(Decimal("0.00"))
+        self.assertEqual(self.quote.total_value_snapshot, Decimal("2500.00"))
+
+    def test_zero_nao_zera_o_simulador(self):
+        from sales.margin import simulate_quote
+
+        self._set_override(Decimal("0.00"))
+        self.assertEqual(simulate_quote(self.quote)["final_total"], Decimal("2500.00"))
+
+    def test_valor_positivo_continua_mandando(self):
+        self._set_override(Decimal("2300.00"))
+        self.assertEqual(self.quote.effective_total_override, Decimal("2300.00"))
+        self.assertEqual(self.quote.calculate_rounded_total(), Decimal("2300.00"))
+
+    def test_formulario_grava_none_em_vez_de_zero(self):
+        from sales.forms import QuoteForm
+
+        for digitado in ("0", "0,00", "0.00"):
+            form = QuoteForm(data={"total_override": digitado})
+            form.is_valid()
+            self.assertIsNone(
+                form.cleaned_data.get("total_override"),
+                msg=f"{digitado!r} deveria virar None",
+            )
+
+
 class BrlParsingTests(TestCase):
     """Milhar sem centavos não pode virar centavo."""
 

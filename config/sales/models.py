@@ -532,6 +532,20 @@ class Quote(models.Model):
         fee_value = self.calculate_payment_fee_value(base_total)
         return base_total + fee_value
 
+    @property
+    def effective_total_override(self) -> Decimal | None:
+        """Preço final ao cliente, ou None quando não há um.
+
+        Zero NÃO é um preço: ninguém vende por R$ 0,00. Gravado assim (por um
+        "0" solto no campo, que a máscara transforma em "0,00"), o override
+        zerava o total de varejo em todas as telas, no PDF e no snapshot que
+        alimenta os relatórios. Tratar 0 como ausência é a única leitura sã.
+        """
+        override = self.total_override
+        if override is None or override <= Decimal("0.00"):
+            return None
+        return override
+
     def apply_client_rounding(self, base: Decimal, use_override: bool = True) -> Decimal:
         """Total de venda ao cliente a partir de um valor base.
 
@@ -544,8 +558,8 @@ class Quote(models.Model):
         `use_override=False` ignora o total_override — usado pelo total de
         atacado, já que o preço final digitado se refere só ao total de varejo.
         """
-        if use_override and self.total_override is not None:
-            return self.total_override
+        if use_override and self.effective_total_override is not None:
+            return self.effective_total_override
         step = ROUNDING_STEPS.get(self.total_rounding_mode)
         if step:
             base = (base / step).quantize(Decimal("1"), rounding=ROUND_HALF_UP) * step

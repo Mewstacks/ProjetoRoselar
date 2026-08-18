@@ -60,6 +60,10 @@ class QuoteForm(forms.ModelForm):
         val = parse_brl_decimal(raw, 'preço final ao cliente')
         if val < 0:
             raise forms.ValidationError('O preço final ao cliente não pode ser negativo.')
+        if val == 0:
+            # "0,00" é campo em branco com um zero sobrando, não uma venda de
+            # graça. Gravar zero zerava o total de varejo do orçamento inteiro.
+            return None
         return val
 
     class Meta:

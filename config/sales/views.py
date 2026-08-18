@@ -127,7 +127,7 @@ def _build_value_breakdown(quote):
         "has_rounding": (
             (
                 selected_tier == PriceTier.RETAIL
-                and quote.total_override is not None
+                and quote.effective_total_override is not None
             )
             or quote.total_rounding_mode != RoundingMode.NONE
             or (quote.total_manual_adjustment or Decimal("0.00")) != Decimal("0.00")
@@ -135,7 +135,8 @@ def _build_value_breakdown(quote):
         # Preço final digitado não é arredondamento: o rótulo precisa dizer de
         # onde veio a diferença para o financeiro não caçar um ajuste inexistente.
         "has_override": (
-            selected_tier == PriceTier.RETAIL and quote.total_override is not None
+            selected_tier == PriceTier.RETAIL
+            and quote.effective_total_override is not None
         ),
         "dual_pricing": quote.dual_pricing,
         "selected_price_tier": selected_tier,
@@ -3011,7 +3012,9 @@ def quote_simulate_commission(request: HttpRequest, quote_id: int) -> HttpRespon
         # sem ele aqui o simulador mostrava o total calculado pelos produtos e
         # divergia do detalhe, do PDF e da comissão. Vale só para o varejo.
         total_override=(
-            quote.total_override if pricing_tier == PriceTier.RETAIL else None
+            quote.effective_total_override
+            if pricing_tier == PriceTier.RETAIL
+            else None
         ),
     )
     ctx["pricing_tier"] = pricing_tier
