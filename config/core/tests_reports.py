@@ -5,16 +5,18 @@ margem, descontos contaminados por orçamentos cancelados, ranking de produtos
 que não reconciliava com o faturamento e exportação que ignorava os filtros.
 """
 
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.contrib.messages.storage.cookie import CookieStorage
+from django.test import RequestFactory, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
 from core.models import Customer, PaymentTariff, PaymentMethodType
-from core.views import _product_revenue, _report_period
+from core.views import _cycle_choices, _product_revenue, _report_period
 from sales.margin import persist_quote_commission, simulate_quote
 from sales.models import CommissionSource, Quote, QuoteCommissionSplit, QuoteStatus
 
@@ -403,3 +405,75 @@ class ReportAccessTests(ReportTestBase):
             with self.subTest(view=name):
                 resp = self.client.get(reverse(name))
                 self.assertEqual(resp.status_code, 302)
+
+
+class ReportPeriodTests(ReportTestBase):
+    """Janela padrão dos relatórios.
+
+    O ciclo de vendas da loja vai do dia 25 ao 24. Fechar o período em `hoje`
+    fazia o dia 25 — o dia em que o financeiro fecha o mês — devolver uma
+    janela de um dia só, apagando da tela o mês inteiro que acabou de fechar.
+    """
+
+    DAY_25 = date(2026, 8, 25)
+
+    def _period(self, **params):
+        request = RequestFactory().get("/relatorios/vendas/", params)
+        request._messages = CookieStorage(request)
+        return _report_period(request)
+
+    def test_default_period_covers_whole_cycle_on_day_25(self):
+        with patch("core.views.timezone.localdate", return_value=self.DAY_25):
+            date_from, date_to = self._period()
+
+        self.assertEqual(date_from, date(2026, 8, 25))
+        self.assertEqual(date_to, date(2026, 9, 24))
+
+    def test_cycle_param_selects_the_closed_cycle(self):
+        with patch("core.views.timezone.localdate", return_value=self.DAY_25):
+            date_from, date_to = self._period(ciclo="2026-07-25")
+
+        self.assertEqual(date_from, date(2026, 7, 25))
+        self.assertEqual(date_to, date(2026, 8, 24))
+
+    def test_cycle_param_accepts_any_day_inside_the_cycle(self):
+        with patch("core.views.timezone.localdate", return_value=self.DAY_25):
+            self.assertEqual(self._period(ciclo="2026-08-10"), (date(2026, 7, 25), date(2026, 8, 24)))
+
+    def test_cycle_param_wins_over_loose_dates(self):
+        with patch("core.views.timezone.localdate", return_value=self.DAY_25):
+            period = self._period(ciclo="2026-07-25", date_from="2026-01-01", date_to="2026-01-31")
+
+        self.assertEqual(period, (date(2026, 7, 25), date(2026, 8, 24)))
+
+    def test_empty_cycle_param_falls_back_to_loose_dates(self):
+        with patch("core.views.timezone.localdate", return_value=self.DAY_25):
+            period = self._period(ciclo="", date_from="2026-01-01", date_to="2026-01-31")
+
+        self.assertEqual(period, (date(2026, 1, 1), date(2026, 1, 31)))
+
+    def test_inverted_dates_are_swapped(self):
+        with patch("core.views.timezone.localdate", return_value=self.DAY_25):
+            period = self._period(date_from="2026-01-31", date_to="2026-01-01")
+
+        self.assertEqual(period, (date(2026, 1, 1), date(2026, 1, 31)))
+
+    def test_closed_cycle_sale_is_visible_on_day_25(self):
+        """Venda do dia 20/08 (ciclo Ago/26) continua acessível no dia 25/08."""
+        self._sale("V-CICLO", items=[("Mesa", 1, "1000.00")], sold_on=date(2026, 8, 20))
+
+        with patch("core.views.timezone.localdate", return_value=self.DAY_25):
+            current = self.client.get(reverse("core:report_sales"))
+            closed = self.client.get(reverse("core:report_sales"), {"ciclo": "2026-07-25"})
+
+        self.assertEqual(current.context["count"], 0)
+        self.assertEqual(closed.context["count"], 1)
+        self.assertEqual(closed.context["total"], Decimal("1000.00"))
+        self.assertEqual(closed.context["cycle_label"], "Ago/26")
+
+    def test_cycle_choices_are_labelled_by_closing_month_in_pt_br(self):
+        cycles = _cycle_choices(self.DAY_25, n=2)
+
+        self.assertEqual([c["label"] for c in cycles], ["Set/26", "Ago/26"])
+        self.assertEqual(cycles[0]["start"], date(2026, 8, 25))
+        self.assertEqual(cycles[0]["end"], date(2026, 9, 24))

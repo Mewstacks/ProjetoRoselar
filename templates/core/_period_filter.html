@@ -1,0 +1,22 @@
+{% comment %}
+Seletor de período dos relatórios (core.views._period_context).
+
+O ciclo de vendas 25→24 é o modo padrão; "Personalizado" libera as datas
+soltas. Sem JS: o servidor só olha date_from/date_to quando `ciclo` vem vazio,
+então os dois controles nunca disputam a mesma requisição.
+{% endcomment %}
+<div>
+  <label for="ciclo" class="form-label small fw-bold mb-0">Ciclo</label>
+  <select id="ciclo" name="ciclo" class="form-control form-control-sm">
+    {% for c in cycles %}<option value="{{ c.value }}"{% if cycle_value == c.value %} selected{% endif %}>{{ c.label }} &middot; {{ c.start|date:"d/m" }}–{{ c.end|date:"d/m" }}</option>{% endfor %}
+    <option value=""{% if not cycle_value %} selected{% endif %}>Personalizado</option>
+  </select>
+</div>
+<div>
+  <label for="date_from" class="form-label small fw-bold mb-0">De</label>
+  <input type="date" id="date_from" name="date_from" value="{{ date_from }}" class="form-control form-control-sm">
+</div>
+<div>
+  <label for="date_to" class="form-label small fw-bold mb-0">Até</label>
+  <input type="date" id="date_to" name="date_to" value="{{ date_to }}" class="form-control form-control-sm">
+</div>

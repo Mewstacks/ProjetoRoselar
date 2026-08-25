@@ -75,10 +75,20 @@ def _next_sales_month_start(start: date_type) -> date_type:
     return (start.replace(day=28) + timedelta(days=10)).replace(day=SALES_MONTH_START_DAY)
 
 
+_MONTHS_PT = (
+    "Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
+    "Jul", "Ago", "Set", "Out", "Nov", "Dez",
+)
+
+
 def _sales_month_label(start: date_type) -> str:
-    """Label for a sales month: its closing calendar month, e.g. 'Jul/25'."""
+    """Label for a sales month: its closing calendar month, e.g. 'Jul/25'.
+
+    strftime("%b") follows the C locale, not LANGUAGE_CODE, so it rendered
+    "Aug/26" on a pt-BR screen. The month names are spelled out here instead.
+    """
     close = (start.replace(day=28) + timedelta(days=10)).replace(day=1)
-    return close.strftime("%b/%y")
+    return f"{_MONTHS_PT[close.month - 1]}/{close:%y}"
 
 
 def _month_bounds(day: date_type) -> tuple[date_type, date_type]:
@@ -231,10 +241,13 @@ def home(request):
         # Monthly chart (6 months) — net values
         month_starts = _last_n_month_starts(today, n=6)
         series_start = month_starts[0]
+        # Teto é o fim do ciclo, não hoje: cortando em `hoje` a barra do mês
+        # corrente ficava menor que o card de faturamento ao lado, que já usa
+        # month_end.
         personal_month_quotes = Quote.objects.sold().filter(
             seller=user,
             sold_on__gte=series_start,
-            sold_on__lte=today,
+            sold_on__lte=month_end,
         ).only("quote_date", "sale_date", "total_value_snapshot")
         chart_labels, chart_values, _ = _build_net_month_series_from_quotes(personal_month_quotes, month_starts)
 
@@ -320,7 +333,7 @@ def home(request):
             # ── BI: Team monthly evolution (last 6 months) — net values ──
             bi_team_all_quotes = Quote.objects.sold().filter(
                 sold_on__gte=series_start,
-                sold_on__lte=today,
+                sold_on__lte=month_end,
             ).only("quote_date", "sale_date", "total_value_snapshot")
             bi_team_chart_labels, bi_team_chart_values, bi_team_chart_counts = _build_net_month_series_from_quotes(
                 bi_team_all_quotes, month_starts,
@@ -533,10 +546,11 @@ def dashboard(request):
     # ── Monthly evolution (last 6 months) — net values ──
     month_starts = _last_n_month_starts(today, n=6)
     series_start = month_starts[0]
+    # Mesmo teto do card de faturamento (month_end), não `hoje`.
     personal_month_quotes = Quote.objects.sold().filter(
         seller=user,
         sold_on__gte=series_start,
-        sold_on__lte=today,
+        sold_on__lte=month_end,
     ).only("quote_date", "sale_date", "total_value_snapshot")
     chart_labels, chart_values, _ = _build_net_month_series_from_quotes(personal_month_quotes, month_starts)
 
@@ -943,20 +957,79 @@ def _parse_date_param(raw, fallback):
         return fallback
 
 
-def _report_period(request) -> tuple[date_type, date_type]:
-    """Período dos relatórios: mês de vendas corrente (25→24) por padrão.
+def _cycle_choices(day: date_type, n: int = 12) -> list[dict]:
+    """Últimos `n` ciclos de venda (25→24), do mais recente para o mais antigo."""
+    choices = []
+    start = _sales_month_start(day)
+    for _ in range(n):
+        cycle_start, cycle_end = _month_bounds(start)
+        choices.append({
+            "value": cycle_start.isoformat(),
+            "label": _sales_month_label(cycle_start),
+            "start": cycle_start,
+            "end": cycle_end,
+        })
+        start = _sales_month_start(cycle_start - timedelta(days=1))
+    return choices
 
-    Datas invertidas eram aceitas em silêncio e devolviam relatório vazio, o que
-    lê como "não houve venda" em vez de "o filtro está errado". Aqui a inversão
-    é corrigida e avisada.
+
+def _report_period(request) -> tuple[date_type, date_type]:
+    """Período dos relatórios: o ciclo de vendas corrente inteiro (25→24).
+
+    O padrão anterior fechava o período em `hoje`, não no dia 24. No dia 25 —
+    primeiro dia do ciclo e justamente o dia em que o financeiro fecha o mês —
+    isso abria uma janela de um dia só: o mês inteiro que acabou de fechar
+    sumia da tela e o relatório lia como "não vendeu nada".
+
+    `ciclo=<AAAA-MM-DD>` seleciona um ciclo inteiro pelo seu dia 25 e vence as
+    datas soltas; sem ele valem `date_from`/`date_to`. Datas invertidas eram
+    aceitas em silêncio e devolviam relatório vazio, o que também lê como "não
+    houve venda" em vez de "o filtro está errado" — aqui a inversão é corrigida
+    e avisada.
     """
     today = timezone.localdate()
-    date_from = _parse_date_param(request.GET.get("date_from"), _month_bounds(today)[0])
-    date_to = _parse_date_param(request.GET.get("date_to"), today)
+
+    cycle_day = _parse_date_param(request.GET.get("ciclo"), None)
+    if cycle_day is not None:
+        return _month_bounds(cycle_day)
+
+    default_from, default_to = _month_bounds(today)
+    date_from = _parse_date_param(request.GET.get("date_from"), default_from)
+    date_to = _parse_date_param(request.GET.get("date_to"), default_to)
     if date_from > date_to:
         date_from, date_to = date_to, date_from
         messages.warning(request, "Data inicial maior que a final — as datas foram invertidas.")
     return date_from, date_to
+
+
+def _period_context(date_from: date_type, date_to: date_type) -> dict:
+    """Variáveis do seletor de período, iguais nos quatro relatórios.
+
+    `cycle_value` vazio significa intervalo que não corresponde a nenhum ciclo:
+    o seletor mostra "Personalizado" e as datas soltas passam a valer.
+    """
+    cycles = _cycle_choices(timezone.localdate())
+    selected = next(
+        (c for c in cycles if c["start"] == date_from and c["end"] == date_to),
+        None,
+    )
+    # Ciclo imediatamente anterior ao período aberto: é a saída do relatório
+    # vazio do dia 25, quando o que o financeiro procura está no mês que fechou.
+    prev_start = _sales_month_start(date_from - timedelta(days=1))
+    return {
+        # ISO para o <input type="date"> e para as querystrings; os objetos
+        # `date` são o que o filtro |date sabe formatar (numa string ele
+        # devolve vazio em silêncio).
+        "date_from": date_from.isoformat(),
+        "date_to": date_to.isoformat(),
+        "period_start": date_from,
+        "period_end": date_to,
+        "cycles": cycles,
+        "cycle_value": selected["value"] if selected else "",
+        "cycle_label": selected["label"] if selected else "",
+        "prev_cycle_value": prev_start.isoformat(),
+        "prev_cycle_label": _sales_month_label(prev_start),
+    }
 
 
 def _product_revenue(date_from, date_to, limit: int = 50) -> list[dict]:
@@ -1069,8 +1142,7 @@ def report_sales(request):
         "total": total,
         "count": count,
         "avg_value": avg_value,
-        "date_from": date_from.isoformat(),
-        "date_to": date_to.isoformat(),
+        **_period_context(date_from, date_to),
         "seller_id": seller_id,
         "sellers": sellers,
     })
@@ -1195,8 +1267,7 @@ def report_commissions(request):
         "finance_count": finance_count,
         "total_commission": total_commission.quantize(Decimal("0.01")),
         "total_sold_period": total_sold_period.quantize(Decimal("0.01")),
-        "date_from": date_from.isoformat(),
-        "date_to": date_to.isoformat(),
+        **_period_context(date_from, date_to),
     })
 
 
@@ -1241,8 +1312,7 @@ def report_discounts(request):
         "total_count": total_count,
         "sold_only": sold_only,
         "date_basis": "data da venda" if sold_only else "data do orçamento",
-        "date_from": date_from.isoformat(),
-        "date_to": date_to.isoformat(),
+        **_period_context(date_from, date_to),
     })
 
 
@@ -1258,8 +1328,7 @@ def report_products(request):
     return render(request, "core/report_products.html", {
         "items": items,
         "total_value": sum((i["total_value"] for i in items), Decimal("0")),
-        "date_from": date_from.isoformat(),
-        "date_to": date_to.isoformat(),
+        **_period_context(date_from, date_to),
     })
 
 

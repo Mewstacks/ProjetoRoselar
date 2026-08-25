@@ -36,10 +36,10 @@
       <div class="container" style="margin-top:80px;">
         <div class="bg-white shadow-sm p-4 mb-4" style="border-radius:8px;">
           <a href="{% url 'core:reports_hub' %}" class="text-decoration-none" style="color:var(--brand);"><i class="fa-solid fa-arrow-left me-1"></i>Relatórios</a>
-          <h1 class="h4 fw-bold mt-1 mb-2" style="color:var(--brand);"><i class="fa-solid fa-percent me-2"></i>Relatório de Comissões</h1>
+          <h1 class="h4 fw-bold mt-1 mb-0" style="color:var(--brand);"><i class="fa-solid fa-percent me-2"></i>Relatório de Comissões</h1>
+          <div class="small fw-bold text-muted mt-1 mb-2">{% if cycle_label %}{{ cycle_label }} &middot; {% endif %}{{ period_start|date:"d/m/Y" }} a {{ period_end|date:"d/m/Y" }}</div>
           <form method="get" class="d-flex gap-2 align-items-end flex-wrap">
-            <div><label class="form-label small fw-bold mb-0">De</label><input type="date" name="date_from" value="{{ date_from }}" class="form-control form-control-sm"></div>
-            <div><label class="form-label small fw-bold mb-0">Até</label><input type="date" name="date_to" value="{{ date_to }}" class="form-control form-control-sm"></div>
+            {% include "core/_period_filter.html" %}
             <button type="submit" class="btn btn-primary btn-sm"><i class="fa-solid fa-search me-1"></i>Filtrar</button>
           </form>
         </div>
@@ -74,7 +74,7 @@
                   <td class="text-end fw-bold" style="color:#198754;">R$ {{ c.est_commission|floatformat:2 }}</td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="6" class="text-center text-muted py-4">Nenhum dado encontrado.</td></tr>
+                <tr><td colspan="6" class="text-center text-muted py-4">Nenhum dado encontrado. <a href="?ciclo={{ prev_cycle_value }}" class="fw-bold text-decoration-underline" style="color:var(--brand);">Ver {{ prev_cycle_label }}</a></td></tr>
                 {% endfor %}
               </tbody>
             </table>
