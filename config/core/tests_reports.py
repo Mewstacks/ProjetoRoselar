@@ -410,70 +410,92 @@ class ReportAccessTests(ReportTestBase):
 class ReportPeriodTests(ReportTestBase):
     """Janela padrão dos relatórios.
 
-    O ciclo de vendas da loja vai do dia 25 ao 24. Fechar o período em `hoje`
-    fazia o dia 25 — o dia em que o financeiro fecha o mês — devolver uma
-    janela de um dia só, apagando da tela o mês inteiro que acabou de fechar.
+    O mês de vendas da loja começa no dia 26 e fecha na meia-noite do dia 25.
+    Dois defeitos se somavam: o período fechava em `hoje` em vez do fim do
+    ciclo, e a âncora estava um dia adiantada (25→24). No dia 25 — o dia em
+    que o financeiro fecha o mês — o relatório abria uma janela de um dia só
+    do ciclo errado, apagando da tela o mês inteiro que estava fechando.
     """
 
-    DAY_25 = date(2026, 8, 25)
+    CLOSING_DAY = date(2026, 8, 25)   # último dia do ciclo Ago/26
+    OPENING_DAY = date(2026, 8, 26)   # primeiro dia do ciclo Set/26
 
-    def _period(self, **params):
+    AGO_26 = (date(2026, 7, 26), date(2026, 8, 25))
+    SET_26 = (date(2026, 8, 26), date(2026, 9, 25))
+
+    def _period(self, today, **params):
         request = RequestFactory().get("/relatorios/vendas/", params)
         request._messages = CookieStorage(request)
-        return _report_period(request)
+        with patch("core.views.timezone.localdate", return_value=today):
+            return _report_period(request)
 
-    def test_default_period_covers_whole_cycle_on_day_25(self):
-        with patch("core.views.timezone.localdate", return_value=self.DAY_25):
-            date_from, date_to = self._period()
+    def test_closing_day_still_belongs_to_the_cycle_it_closes(self):
+        """Dia 25 é o último dia do mês corrente, não o primeiro do seguinte."""
+        self.assertEqual(self._period(self.CLOSING_DAY), self.AGO_26)
 
-        self.assertEqual(date_from, date(2026, 8, 25))
-        self.assertEqual(date_to, date(2026, 9, 24))
+    def test_new_cycle_starts_on_the_26th(self):
+        self.assertEqual(self._period(self.OPENING_DAY), self.SET_26)
+
+    def test_default_period_runs_to_the_end_of_the_cycle(self):
+        """Fim do período é o dia 25, não `hoje`."""
+        self.assertEqual(self._period(date(2026, 8, 1)), self.AGO_26)
 
     def test_cycle_param_selects_the_closed_cycle(self):
-        with patch("core.views.timezone.localdate", return_value=self.DAY_25):
-            date_from, date_to = self._period(ciclo="2026-07-25")
-
-        self.assertEqual(date_from, date(2026, 7, 25))
-        self.assertEqual(date_to, date(2026, 8, 24))
+        self.assertEqual(self._period(self.OPENING_DAY, ciclo="2026-07-26"), self.AGO_26)
 
     def test_cycle_param_accepts_any_day_inside_the_cycle(self):
-        with patch("core.views.timezone.localdate", return_value=self.DAY_25):
-            self.assertEqual(self._period(ciclo="2026-08-10"), (date(2026, 7, 25), date(2026, 8, 24)))
+        self.assertEqual(self._period(self.OPENING_DAY, ciclo="2026-08-10"), self.AGO_26)
 
     def test_cycle_param_wins_over_loose_dates(self):
-        with patch("core.views.timezone.localdate", return_value=self.DAY_25):
-            period = self._period(ciclo="2026-07-25", date_from="2026-01-01", date_to="2026-01-31")
-
-        self.assertEqual(period, (date(2026, 7, 25), date(2026, 8, 24)))
+        period = self._period(
+            self.OPENING_DAY, ciclo="2026-07-26", date_from="2026-01-01", date_to="2026-01-31",
+        )
+        self.assertEqual(period, self.AGO_26)
 
     def test_empty_cycle_param_falls_back_to_loose_dates(self):
-        with patch("core.views.timezone.localdate", return_value=self.DAY_25):
-            period = self._period(ciclo="", date_from="2026-01-01", date_to="2026-01-31")
-
+        period = self._period(
+            self.OPENING_DAY, ciclo="", date_from="2026-01-01", date_to="2026-01-31",
+        )
         self.assertEqual(period, (date(2026, 1, 1), date(2026, 1, 31)))
 
     def test_inverted_dates_are_swapped(self):
-        with patch("core.views.timezone.localdate", return_value=self.DAY_25):
-            period = self._period(date_from="2026-01-31", date_to="2026-01-01")
-
+        period = self._period(self.OPENING_DAY, date_from="2026-01-31", date_to="2026-01-01")
         self.assertEqual(period, (date(2026, 1, 1), date(2026, 1, 31)))
 
-    def test_closed_cycle_sale_is_visible_on_day_25(self):
-        """Venda do dia 20/08 (ciclo Ago/26) continua acessível no dia 25/08."""
+    def test_sale_on_the_closing_day_counts_in_the_cycle_it_closes(self):
+        self._sale("V-25", items=[("Mesa", 1, "1000.00")], sold_on=self.CLOSING_DAY)
+
+        with patch("core.views.timezone.localdate", return_value=self.CLOSING_DAY):
+            resp = self.client.get(reverse("core:report_sales"))
+
+        self.assertEqual(resp.context["cycle_label"], "Ago/26")
+        self.assertEqual(resp.context["count"], 1)
+        self.assertEqual(resp.context["total"], Decimal("1000.00"))
+
+    def test_closed_cycle_stays_reachable_after_the_turn(self):
+        """No dia 26 o mês que fechou está a um clique, pelo seletor de ciclo."""
         self._sale("V-CICLO", items=[("Mesa", 1, "1000.00")], sold_on=date(2026, 8, 20))
 
-        with patch("core.views.timezone.localdate", return_value=self.DAY_25):
+        with patch("core.views.timezone.localdate", return_value=self.OPENING_DAY):
             current = self.client.get(reverse("core:report_sales"))
-            closed = self.client.get(reverse("core:report_sales"), {"ciclo": "2026-07-25"})
+            closed = self.client.get(reverse("core:report_sales"), {"ciclo": "2026-07-26"})
 
         self.assertEqual(current.context["count"], 0)
+        self.assertEqual(current.context["prev_cycle_value"], "2026-07-26")
+        self.assertEqual(current.context["prev_cycle_label"], "Ago/26")
         self.assertEqual(closed.context["count"], 1)
-        self.assertEqual(closed.context["total"], Decimal("1000.00"))
         self.assertEqual(closed.context["cycle_label"], "Ago/26")
 
     def test_cycle_choices_are_labelled_by_closing_month_in_pt_br(self):
-        cycles = _cycle_choices(self.DAY_25, n=2)
+        cycles = _cycle_choices(self.OPENING_DAY, n=2)
 
         self.assertEqual([c["label"] for c in cycles], ["Set/26", "Ago/26"])
-        self.assertEqual(cycles[0]["start"], date(2026, 8, 25))
-        self.assertEqual(cycles[0]["end"], date(2026, 9, 24))
+        self.assertEqual((cycles[0]["start"], cycles[0]["end"]), self.SET_26)
+        self.assertEqual((cycles[1]["start"], cycles[1]["end"]), self.AGO_26)
+
+    def test_february_cycle_ends_on_the_25th(self):
+        """Fevereiro é curto, mas a âncora é o dia, não a contagem de dias."""
+        self.assertEqual(
+            self._period(date(2026, 2, 10)),
+            (date(2026, 1, 26), date(2026, 2, 25)),
+        )

@@ -56,14 +56,14 @@ def _json_html(data) -> str:
     )
 
 
-# The company's sales month runs from the 25th of one calendar month through
-# the 24th of the next, and is labeled by its closing month
-# (e.g. 25/Jun–24/Jul is the "Jul" sales month).
-SALES_MONTH_START_DAY = 25
+# The company's sales month runs from the 26th of one calendar month through
+# the 25th of the next (the 25th closes at midnight), and is labeled by its
+# closing month (e.g. 26/Jun–25/Jul is the "Jul" sales month).
+SALES_MONTH_START_DAY = 26
 
 
 def _sales_month_start(day: date_type) -> date_type:
-    """Start date (a 25th) of the sales month containing `day`."""
+    """Start date (a 26th) of the sales month containing `day`."""
     if day.day >= SALES_MONTH_START_DAY:
         return day.replace(day=SALES_MONTH_START_DAY)
     prev_month_end = day.replace(day=1) - timedelta(days=1)
@@ -71,7 +71,7 @@ def _sales_month_start(day: date_type) -> date_type:
 
 
 def _next_sales_month_start(start: date_type) -> date_type:
-    """Next sales month's start, given a sales-month start (a 25th)."""
+    """Next sales month's start, given a sales-month start (a 26th)."""
     return (start.replace(day=28) + timedelta(days=10)).replace(day=SALES_MONTH_START_DAY)
 
 
@@ -92,7 +92,7 @@ def _sales_month_label(start: date_type) -> str:
 
 
 def _month_bounds(day: date_type) -> tuple[date_type, date_type]:
-    """Start (25th) and end (24th) of the sales month containing `day`."""
+    """Start (26th) and end (25th) of the sales month containing `day`."""
     month_start = _sales_month_start(day)
     month_end = _next_sales_month_start(month_start) - timedelta(days=1)
     return month_start, month_end
@@ -958,7 +958,7 @@ def _parse_date_param(raw, fallback):
 
 
 def _cycle_choices(day: date_type, n: int = 12) -> list[dict]:
-    """Últimos `n` ciclos de venda (25→24), do mais recente para o mais antigo."""
+    """Últimos `n` ciclos de venda (26→25), do mais recente para o mais antigo."""
     choices = []
     start = _sales_month_start(day)
     for _ in range(n):
@@ -974,15 +974,16 @@ def _cycle_choices(day: date_type, n: int = 12) -> list[dict]:
 
 
 def _report_period(request) -> tuple[date_type, date_type]:
-    """Período dos relatórios: o ciclo de vendas corrente inteiro (25→24).
+    """Período dos relatórios: o ciclo de vendas corrente inteiro (26→25).
 
-    O padrão anterior fechava o período em `hoje`, não no dia 24. No dia 25 —
-    primeiro dia do ciclo e justamente o dia em que o financeiro fecha o mês —
-    isso abria uma janela de um dia só: o mês inteiro que acabou de fechar
-    sumia da tela e o relatório lia como "não vendeu nada".
+    O padrão anterior fechava o período em `hoje`, não no último dia do ciclo.
+    No dia 26 — primeiro dia do ciclo — isso abria uma janela de um dia só: o
+    mês inteiro que acabou de fechar sumia da tela e o relatório lia como "não
+    vendeu nada".
 
-    `ciclo=<AAAA-MM-DD>` seleciona um ciclo inteiro pelo seu dia 25 e vence as
-    datas soltas; sem ele valem `date_from`/`date_to`. Datas invertidas eram
+    `ciclo=<AAAA-MM-DD>` seleciona um ciclo inteiro por qualquer dia dentro
+    dele e vence as datas soltas; sem ele valem `date_from`/`date_to`. Datas
+    invertidas eram
     aceitas em silêncio e devolviam relatório vazio, o que também lê como "não
     houve venda" em vez de "o filtro está errado" — aqui a inversão é corrigida
     e avisada.
@@ -1014,7 +1015,8 @@ def _period_context(date_from: date_type, date_to: date_type) -> dict:
         None,
     )
     # Ciclo imediatamente anterior ao período aberto: é a saída do relatório
-    # vazio do dia 25, quando o que o financeiro procura está no mês que fechou.
+    # vazio dos primeiros dias do ciclo, quando o que o financeiro procura
+    # está no mês que acabou de fechar.
     prev_start = _sales_month_start(date_from - timedelta(days=1))
     return {
         # ISO para o <input type="date"> e para as querystrings; os objetos
@@ -1481,7 +1483,7 @@ def goal_create(request):
 
     period = request.POST.get("period", GoalPeriod.MONTHLY)
     if period == GoalPeriod.MONTHLY:
-        # Metas mensais seguem o ciclo de vendas 25→24
+        # Metas mensais seguem o ciclo de vendas 26→25
         requested_start, requested_end = _month_bounds(requested_start)
     SalesGoal.objects.update_or_create(
         goal_type=GoalType.COLLECTIVE,
