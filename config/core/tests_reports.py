@@ -224,6 +224,117 @@ class CommissionReportTests(ReportTestBase):
         self.assertEqual(resp.context["estimated_count"], 1)
 
 
+class SplitEditedAfterSaleTests(ReportTestBase):
+    """A divisão só era gravável no modal de conversão, que some depois da venda.
+
+    Editá-la depois é o que os vendedores pediam ("não dá para dividir
+    comissão"); o relatório tem que acompanhar sem recalcular nada.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self._tariff(PaymentMethodType.PIX, 1, "0.00")
+        self.other = User.objects.create_user(username="parceiro", password="x", role="SELLER")
+
+    def _sold(self, number="V-SPLIT"):
+        quote = self._sale(
+            number, items=[("Mesa", 1, "1000.00")],
+            payment_type=PaymentMethodType.PIX, payment_installments=1,
+        )
+        persist_quote_commission(quote)
+        quote.refresh_from_db()
+        return quote
+
+    def _post_split(self, quote, ids):
+        return self.client.post(
+            reverse("sales:quote_commission_split", args=[quote.id]),
+            {"commission_seller_ids": ids},
+        )
+
+    def test_split_edited_after_conversion_changes_the_report(self):
+        quote = self._sold()
+        self._post_split(quote, [self.other.pk])
+
+        resp = self.client.get(reverse("core:report_commissions"), self._period_qs())
+        rows = resp.context["commissions"]
+
+        self.assertEqual(len(rows), 2)
+        for row in rows:
+            self.assertEqual(row["est_commission"], quote.commission_value / 2)
+        self.assertEqual(resp.context["sales_count"], 1)
+
+    def test_clearing_split_returns_full_commission_to_owner(self):
+        quote = self._sold()
+        self._post_split(quote, [self.other.pk])
+        self._post_split(quote, [])
+
+        # Linha apagada, não esvaziada: é o único estado canônico de "sem divisão".
+        self.assertFalse(QuoteCommissionSplit.objects.filter(quote=quote).exists())
+
+        resp = self.client.get(reverse("core:report_commissions"), self._period_qs())
+        rows = resp.context["commissions"]
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["est_commission"], quote.commission_value)
+
+    def test_split_always_keeps_the_owner(self):
+        """Tirar o dono deixaria o faturamento com ele e a comissão com o outro."""
+        quote = self._sold()
+        self._post_split(quote, [self.other.pk, self.seller.pk])
+
+        split = QuoteCommissionSplit.objects.get(quote=quote)
+        self.assertIn(self.seller, split.get_sellers())
+
+    def test_commission_value_is_not_recalculated(self):
+        quote = self._sold()
+        frozen = quote.commission_value
+        self._post_split(quote, [self.other.pk])
+
+        quote.refresh_from_db()
+        self.assertEqual(quote.commission_value, frozen)
+
+    def test_finance_share_still_evaporates_after_edit(self):
+        finance = User.objects.create_user(username="financeiro", password="x", role="FINANCE")
+        quote = self._sold()
+        # O endpoint só aceita SELLER; o financeiro entra pela porta do admin.
+        split = QuoteCommissionSplit.objects.create(quote=quote)
+        split.users.set([self.seller, finance])
+
+        resp = self.client.get(reverse("core:report_commissions"), self._period_qs())
+        rows = resp.context["commissions"]
+
+        self.assertEqual([r["seller"] for r in rows], ["vendedor"])
+        self.assertEqual(rows[0]["est_commission"], quote.commission_value / 2)
+
+
+class PeriodFilterTests(ReportTestBase):
+    """Nos primeiros dias do ciclo o relatório é magro por definição."""
+
+    def test_prev_cycle_link_is_present_even_when_the_report_has_rows(self):
+        # Dia 27: o ciclo abriu dia 26, o mês fechado saiu da tela.
+        day27 = date(2026, 8, 27)
+        self._sale("V-1", items=[("Mesa", 1, "1000.00")], sold_on=day27)
+
+        with patch("core.views.timezone.localdate", return_value=day27):
+            resp = self.client.get(reverse("core:report_sales"))
+
+        self.assertEqual(resp.context["count"], 1)          # tabela NÃO está vazia
+        self.assertEqual(resp.context["cycle_day_index"], 2)
+        self.assertEqual(resp.context["prev_cycle_label"], "Ago/26")
+        self.assertIn("ciclo=2026-07-26", resp.context["prev_cycle_qs"])
+
+    def test_prev_cycle_qs_preserves_the_seller_filter(self):
+        resp = self.client.get(reverse("core:report_sales"), {"seller": self.seller.pk})
+
+        self.assertIn(f"seller={self.seller.pk}", resp.context["prev_cycle_qs"])
+        self.assertNotIn("date_from", resp.context["prev_cycle_qs"])
+
+    def test_day_index_is_absent_for_a_closed_cycle(self):
+        resp = self.client.get(reverse("core:report_sales"), {"ciclo": "2020-01-26"})
+
+        self.assertIsNone(resp.context["cycle_day_index"])
+
+
 class FinanceExclusionTests(ReportTestBase):
     """Financeiro não recebe comissão, então não pode aparecer no relatório."""
 

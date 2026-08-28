@@ -67,7 +67,7 @@
                   <td class="text-end">R$ {{ q.total_value_snapshot|floatformat:2 }}</td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="6" class="text-center text-muted py-4">Nenhum desconto encontrado. <a href="?ciclo={{ prev_cycle_value }}&amp;sold_only={% if sold_only %}1{% else %}0{% endif %}" class="fw-bold text-decoration-underline" style="color:var(--brand);">Ver {{ prev_cycle_label }}</a></td></tr>
+                <tr><td colspan="6" class="text-center text-muted py-4">Nenhum desconto encontrado. <a href="{{ prev_cycle_qs }}" class="fw-bold text-decoration-underline" style="color:var(--brand);">Ver {{ prev_cycle_label }}</a></td></tr>
                 {% endfor %}
               </tbody>
             </table>

@@ -1,0 +1,15 @@
+{% comment %}Lista de vendedores que dividem a comissão. Sem <form>: quem inclui define o action (modal de conversão ou painel da venda).{% endcomment %}
+{% if sellers_for_split %}
+  <div style="display:flex;flex-direction:column;gap:.3rem;max-height:160px;overflow-y:auto;padding:.4rem .5rem;background:#f8f9fa;border-radius:6px;border:1px solid #dee2e6;">
+    {% for s in sellers_for_split %}
+      <label style="display:flex;align-items:center;gap:.5rem;font-size:.82rem;cursor:pointer;min-height:24px;">
+        <input type="checkbox" name="commission_seller_ids" value="{{ s.pk }}"
+          {% if s.pk in existing_split_ids %}checked{% endif %}
+          style="accent-color:var(--brand);width:16px;height:16px;">
+        {{ s.get_full_name|default:s.username }}
+      </label>
+    {% endfor %}
+  </div>
+{% else %}
+  <p style="font-size:.79rem;color:var(--muted);margin:0;">Nenhum outro vendedor ativo.</p>
+{% endif %}

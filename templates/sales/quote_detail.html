@@ -871,25 +871,7 @@
                         <div style="font-size:.82rem;font-weight:700;color:var(--dark);margin-bottom:.4rem;">
                           <i class="fa-solid fa-percent me-1" style="color:var(--brand);"></i>Divisão de Comissão
                         </div>
-                        <p style="font-size:.79rem;color:var(--muted);margin-bottom:.5rem;">
-                          Selecione os vendedores que dividirão a comissão <strong>igualmente</strong> com
-                          <strong>{{ quote.seller.get_full_name|default:quote.seller.username }}</strong>.
-                          Se nenhum for selecionado, 100% vai para o vendedor do orçamento.
-                        </p>
-                        {% if sellers_for_split %}
-                          <div style="display:flex;flex-direction:column;gap:.3rem;max-height:160px;overflow-y:auto;padding:.4rem .5rem;background:#f8f9fa;border-radius:6px;border:1px solid #dee2e6;">
-                            {% for s in sellers_for_split %}
-                              <label style="display:flex;align-items:center;gap:.5rem;font-size:.82rem;cursor:pointer;">
-                                <input type="checkbox" name="commission_seller_ids" value="{{ s.pk }}"
-                                  {% if s.pk in existing_split_ids %}checked{% endif %}
-                                  style="accent-color:var(--brand);width:15px;height:15px;">
-                                {{ s.get_full_name|default:s.username }}
-                              </label>
-                            {% endfor %}
-                          </div>
-                        {% else %}
-                          <p style="font-size:.79rem;color:var(--muted);font-style:italic;">Não há outros vendedores ativos para selecionar.</p>
-                        {% endif %}
+                        {% include "sales/_commission_split_fields.html" %}
                       </div>
                     </div>
                     <div class="modal-footer">
@@ -902,6 +884,12 @@
                 </div>
               </div>
             </div>
+          {% endif %}
+        {% endif %}
+
+        {% if quote.status == 'CONVERTED' or quote.status == 'POS_VENDA' %}
+          {% if can_view_commission %}
+            {% include "sales/_commission_split.html" %}
           {% endif %}
         {% endif %}
 
@@ -921,6 +909,25 @@
                 <span class="r-l"><i class="fa-solid fa-circle-dot me-2" style="color:var(--orange);font-size:.6rem;"></i>Desconto autorizado por</span>
                 <span style="font-weight:700;">{{ quote.discount_authorized_by.username }} — {{ quote.discount_authorized_at|date:"d/m/Y H:i" }}</span>
               </div>
+            {% endif %}
+            {% for log in quote_audit %}
+              <div class="r-line" style="align-items:flex-start;">
+                <span class="r-l">
+                  <i class="fa-solid fa-circle-dot me-2" style="color:var(--muted);font-size:.6rem;"></i>{{ log.get_action_display }}
+                  <span style="color:var(--muted);">— {{ log.user.username|default:"—" }}, {{ log.created_at|date:"d/m/Y H:i" }}</span>
+                  {% for campo, m in log.extra_data.diff.items %}
+                    <span style="display:block;font-size:.76rem;padding-left:1.1rem;">
+                      {{ campo }}:
+                      <s style="color:var(--muted);">{{ m.de }}</s> &rarr; <strong>{{ m.para }}</strong>
+                    </span>
+                  {% endfor %}
+                </span>
+              </div>
+            {% endfor %}
+            {% if quote_audit %}
+              <a href="{% url 'core:audit_log_list' %}?q={{ quote.number }}" class="btn-a secondary" style="margin-top:.55rem;">
+                <i class="fa-solid fa-clock-rotate-left"></i>Ver tudo
+              </a>
             {% endif %}
           </div>
         </div>

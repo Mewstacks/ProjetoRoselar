@@ -1,5 +1,8 @@
 from django.contrib import admin
-from .models import Quote, QuoteItem, Order, OrderItem, ProposalConfig, SaleDocument
+from .models import (
+    Quote, QuoteItem, Order, OrderItem, ProposalConfig, SaleDocument,
+    QuoteCommissionSplit,
+)
 from core.admin_helpers import AdminOnly, SellerAccess, _is_admin
 
 
@@ -66,3 +69,34 @@ class SaleDocumentAdmin(SellerAccess, admin.ModelAdmin):
     list_filter = ("doc_type",)
     search_fields = ("quote__number", "supplier__name", "description")
     readonly_fields = ("uploaded_at",)
+
+
+@admin.register(QuoteCommissionSplit)
+class QuoteCommissionSplitAdmin(AdminOnly, admin.ModelAdmin):
+    """Conserto de última instância da divisão de comissão.
+
+    A edição normal é no painel da venda (sales:quote_commission_split), que
+    grava AuditLog. O que passa por aqui não gera AuditLog — fica só no
+    LogEntry do próprio admin do Django.
+    """
+    list_display = ("quote", "sellers_display")
+    search_fields = ("quote__number",)
+    filter_horizontal = ("users",)
+
+    @admin.display(description="Vendedores")
+    def sellers_display(self, obj):
+        return ", ".join(
+            u.get_full_name() or u.username for u in obj.users.all()
+        ) or "—"
+
+    def formfield_for_manytomany(self, db_field, request, **kwargs):
+        # Sem este filtro o admin vira a única porta capaz de colocar alguém do
+        # financeiro numa divisão — e o relatório queima a cota dele (divide por
+        # todos os participantes, paga só aos vendedores).
+        if db_field.name == "users":
+            from accounts.models import Role
+            from django.contrib.auth import get_user_model
+            kwargs["queryset"] = get_user_model().objects.filter(
+                is_active=True, role=Role.SELLER
+            ).order_by("first_name", "username")
+        return super().formfield_for_manytomany(db_field, request, **kwargs)

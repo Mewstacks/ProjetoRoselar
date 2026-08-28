@@ -1,7 +1,7 @@
 {% comment %}
 Seletor de período dos relatórios (core.views._period_context).
 
-O ciclo de vendas 25→24 é o modo padrão; "Personalizado" libera as datas
+O ciclo de vendas 26→25 é o modo padrão; "Personalizado" libera as datas
 soltas. Sem JS: o servidor só olha date_from/date_to quando `ciclo` vem vazio,
 então os dois controles nunca disputam a mesma requisição.
 {% endcomment %}
@@ -19,4 +19,15 @@ então os dois controles nunca disputam a mesma requisição.
 <div>
   <label for="date_to" class="form-label small fw-bold mb-0">Até</label>
   <input type="date" id="date_to" name="date_to" value="{{ date_to }}" class="form-control form-control-sm">
+</div>
+{% comment %}
+Saída sempre visível para o ciclo anterior. Nos primeiros dias do ciclo o
+relatório é quase vazio por definição (o mês fechou dia 25), e a única saída
+ficava dentro da linha "nenhum registro" — que não aparece quando há uma venda.
+{% endcomment %}
+<div class="d-flex align-items-end gap-2">
+  <a href="{{ prev_cycle_qs }}" class="btn btn-outline-dark btn-sm">&lsaquo; {{ prev_cycle_label }}</a>
+  {% if cycle_day_index %}
+    <span class="badge bg-secondary" style="font-weight:600;">Dia {{ cycle_day_index }}/{{ cycle_days_total }}</span>
+  {% endif %}
 </div>

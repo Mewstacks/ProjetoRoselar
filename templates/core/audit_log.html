@@ -43,7 +43,22 @@
                 {% for val, label in actions %}<option value="{{ val }}" {% if action_filter == val %}selected{% endif %}>{{ label }}</option>{% endfor %}
               </select>
             </div>
+            <div>
+              <label for="audit_q" class="form-label small fw-bold mb-0">Orçamento</label>
+              <input type="search" id="audit_q" name="q" value="{{ quote_filter }}" placeholder="Número"
+                     class="form-control form-control-sm">
+            </div>
+            <div>
+              <label for="audit_user" class="form-label small fw-bold mb-0">Usuário</label>
+              <select id="audit_user" name="user" class="form-control form-control-sm">
+                <option value="">Todos</option>
+                {% for u in users %}<option value="{{ u.pk }}" {% if user_filter == u.pk|stringformat:"s" %}selected{% endif %}>{{ u.get_full_name|default:u.username }}</option>{% endfor %}
+              </select>
+            </div>
             <button type="submit" class="btn btn-primary btn-sm"><i class="fa-solid fa-filter me-1"></i>Filtrar</button>
+            {% if action_filter or quote_filter or user_filter %}
+              <a href="{% url 'core:audit_log_list' %}" class="btn btn-outline-dark btn-sm">Ver tudo</a>
+            {% endif %}
           </form>
         </div>
 
@@ -54,19 +69,41 @@
               <tbody>
                 {% for log in logs %}
                 <tr>
-                  <td style="white-space:nowrap;">{{ log.timestamp|date:"d/m/Y H:i" }}</td>
-                  <td>{{ log.user.username }}</td>
+                  <td style="white-space:nowrap;">{{ log.created_at|date:"d/m/Y H:i" }}</td>
+                  <td>{{ log.user.username|default:"—" }}</td>
                   <td><span class="badge bg-secondary">{{ log.get_action_display }}</span></td>
-                  <td>{{ log.description|truncatechars:60 }}</td>
+                  <td>
+                    {{ log.description }}
+                    {% for campo, m in log.extra_data.diff.items %}
+                      <div class="small" style="padding-left:.75rem;">
+                        {{ campo }}: <s class="text-muted">{{ m.de }}</s> &rarr; <strong>{{ m.para }}</strong>
+                      </div>
+                    {% endfor %}
+                  </td>
                   <td class="text-muted">{{ log.ip_address|default:"-" }}</td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="5" class="text-center text-muted py-4">Nenhum registro encontrado.</td></tr>
+                <tr><td colspan="5" class="text-center text-muted py-4">
+                  Nenhum registro encontrado.
+                  {% if action_filter or quote_filter or user_filter %}
+                    <a href="{% url 'core:audit_log_list' %}" class="fw-bold text-decoration-underline" style="color:var(--brand);">Ver tudo</a>
+                  {% endif %}
+                </td></tr>
                 {% endfor %}
               </tbody>
             </table>
           </div>
         </div>
+
+        {% if page_obj.paginator.num_pages > 1 %}
+        <nav class="mt-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+          <span class="small text-muted">Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
+          <div class="d-flex gap-2">
+            {% if page_obj.has_previous %}<a class="btn btn-outline-dark btn-sm" href="?action={{ action_filter }}&amp;q={{ quote_filter }}&amp;user={{ user_filter }}&amp;page={{ page_obj.previous_page_number }}">Anterior</a>{% endif %}
+            {% if page_obj.has_next %}<a class="btn btn-outline-dark btn-sm" href="?action={{ action_filter }}&amp;q={{ quote_filter }}&amp;user={{ user_filter }}&amp;page={{ page_obj.next_page_number }}">Próxima</a>{% endif %}
+          </div>
+        </nav>
+        {% endif %}
       </div>
     </section>
     <section class="pt-4 pb-3" style="background:var(--brand);color:#fff;"><div class="container text-center"><p class="mb-0">&copy; 2026 Roselar.</p></div></section>

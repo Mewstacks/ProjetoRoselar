@@ -57,7 +57,7 @@
                   <td class="text-end fw-bold" style="color:#198754;">R$ {{ item.total_value|floatformat:2 }}</td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="4" class="text-center text-muted py-4">Nenhum dado encontrado. <a href="?ciclo={{ prev_cycle_value }}" class="fw-bold text-decoration-underline" style="color:var(--brand);">Ver {{ prev_cycle_label }}</a></td></tr>
+                <tr><td colspan="4" class="text-center text-muted py-4">Nenhum dado encontrado. <a href="{{ prev_cycle_qs }}" class="fw-bold text-decoration-underline" style="color:var(--brand);">Ver {{ prev_cycle_label }}</a></td></tr>
                 {% endfor %}
               </tbody>
               {% if items %}

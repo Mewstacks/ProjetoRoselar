@@ -1003,22 +1003,43 @@ def _report_period(request) -> tuple[date_type, date_type]:
     return date_from, date_to
 
 
-def _period_context(date_from: date_type, date_to: date_type) -> dict:
+def _period_context(request, date_from: date_type, date_to: date_type) -> dict:
     """Variáveis do seletor de período, iguais nos quatro relatórios.
 
     `cycle_value` vazio significa intervalo que não corresponde a nenhum ciclo:
     o seletor mostra "Personalizado" e as datas soltas passam a valer.
     """
-    cycles = _cycle_choices(timezone.localdate())
+    today = timezone.localdate()
+    cycles = _cycle_choices(today)
     selected = next(
         (c for c in cycles if c["start"] == date_from and c["end"] == date_to),
         None,
     )
-    # Ciclo imediatamente anterior ao período aberto: é a saída do relatório
-    # vazio dos primeiros dias do ciclo, quando o que o financeiro procura
-    # está no mês que acabou de fechar.
+    # Ciclo imediatamente anterior ao período aberto: é a saída dos primeiros
+    # dias do ciclo, quando o que o financeiro procura está no mês que acabou
+    # de fechar. Ficava só na linha de tabela vazia — com uma venda no ciclo
+    # novo a tabela não está vazia e a saída sumia junto.
     prev_start = _sales_month_start(date_from - timedelta(days=1))
+
+    # Querystring do ciclo anterior preservando os filtros abertos (vendedor,
+    # sold_only). Montada à mão em cada template, ela ia divergir.
+    params = request.GET.copy()
+    params.pop("date_from", None)
+    params.pop("date_to", None)
+    params.pop("page", None)
+    params["ciclo"] = prev_start.isoformat()
+
+    # Quantos dias do ciclo já correram. É o que explica um relatório magro sem
+    # precisar de uma frase explicando o relatório.
+    cycle_day_index = cycle_days_total = None
+    if date_from <= today <= date_to:
+        cycle_day_index = (today - date_from).days + 1
+        cycle_days_total = (date_to - date_from).days + 1
+
     return {
+        "prev_cycle_qs": "?" + params.urlencode(),
+        "cycle_day_index": cycle_day_index,
+        "cycle_days_total": cycle_days_total,
         # ISO para o <input type="date"> e para as querystrings; os objetos
         # `date` são o que o filtro |date sabe formatar (numa string ele
         # devolve vazio em silêncio).
@@ -1144,7 +1165,7 @@ def report_sales(request):
         "total": total,
         "count": count,
         "avg_value": avg_value,
-        **_period_context(date_from, date_to),
+        **_period_context(request, date_from, date_to),
         "seller_id": seller_id,
         "sellers": sellers,
     })
@@ -1269,7 +1290,7 @@ def report_commissions(request):
         "finance_count": finance_count,
         "total_commission": total_commission.quantize(Decimal("0.01")),
         "total_sold_period": total_sold_period.quantize(Decimal("0.01")),
-        **_period_context(date_from, date_to),
+        **_period_context(request, date_from, date_to),
     })
 
 
@@ -1314,7 +1335,7 @@ def report_discounts(request):
         "total_count": total_count,
         "sold_only": sold_only,
         "date_basis": "data da venda" if sold_only else "data do orçamento",
-        **_period_context(date_from, date_to),
+        **_period_context(request, date_from, date_to),
     })
 
 
@@ -1330,7 +1351,7 @@ def report_products(request):
     return render(request, "core/report_products.html", {
         "items": items,
         "total_value": sum((i["total_value"] for i in items), Decimal("0")),
-        **_period_context(date_from, date_to),
+        **_period_context(request, date_from, date_to),
     })
 
 
@@ -1392,14 +1413,43 @@ def audit_log_list(request):
         return redirect("core:dashboard")
 
     action_filter = request.GET.get("action", "")
+    quote_filter = request.GET.get("q", "").strip()
+    user_filter = request.GET.get("user", "")
+
     qs = AuditLog.objects.select_related("user").all()
     if action_filter:
         qs = qs.filter(action=action_filter)
+    if quote_filter:
+        # Filtra pelo objeto, não por lookup dentro do JSON: `extra_data` só
+        # existe nas linhas novas, e o lookup em JSONField diverge entre sqlite
+        # (local) e Postgres (produção).
+        from sales.models import Quote
+        qs = qs.filter(
+            object_type="Quote",
+            object_id__in=Quote.objects.filter(
+                number__icontains=quote_filter
+            ).values("pk"),
+        )
+    if user_filter:
+        # `?user=abc` na barra de endereço não pode virar 500.
+        try:
+            qs = qs.filter(user_id=int(user_filter))
+        except (TypeError, ValueError):
+            user_filter = ""
 
+    paginator = Paginator(qs, 50)
+    page = paginator.get_page(request.GET.get("page"))
+
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
     return render(request, "core/audit_log.html", {
-        "logs": qs[:200],
+        "logs": page,
+        "page_obj": page,
         "actions": AuditAction.choices,
         "action_filter": action_filter,
+        "quote_filter": quote_filter,
+        "user_filter": user_filter,
+        "users": User.objects.filter(is_active=True).order_by("first_name", "username"),
     })
 
 

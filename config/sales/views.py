@@ -15,7 +15,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, models, transaction
-from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.http import HttpRequest, HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
@@ -70,6 +70,14 @@ def _can_generate_order_pdf(user):
 
 def _can_view_commission(user):
     return not _is_finance(user)
+
+def _can_edit_commission_split(user, quote):
+    """Quem pode redesenhar a divisão da comissão de uma venda.
+
+    Não é `_can_access_all_quotes`: aquele inclui o financeiro, que aprova a
+    venda mas não decide quem recebe por ela.
+    """
+    return _is_admin(user) or quote.seller_id == user.id
 
 
 def _build_value_breakdown(quote):
@@ -473,6 +481,24 @@ def authorize_discount_api(request: HttpRequest) -> JsonResponse:
         user = authenticate(username=target_username, password=password)
 
         if user and _is_admin(user):
+            # Quem pediu e quem autorizou costumam ser pessoas diferentes — é
+            # justamente essa diferença que a auditoria precisa guardar. Até
+            # aqui a ação APROVAR DESCONTO existia sem nunca ser emitida, e o
+            # único vestígio era discount_authorized_by, sobrescrito na edição
+            # seguinte. O endpoint não conhece o orçamento (o formulário ainda
+            # nem foi salvo), então a linha fica sem objeto.
+            from core.models import AuditLog, AuditAction
+            AuditLog.log(
+                request.user,
+                AuditAction.APPROVE_DISCOUNT,
+                f"Desconto de {discount_value:.1f}% autorizado.",
+                ip_address=request.META.get('REMOTE_ADDR'),
+                extra_data={
+                    "desconto": f"{discount_value:.1f}",
+                    "solicitado_por": request.user.username,
+                    "autorizado_por": user.username,
+                },
+            )
             return JsonResponse({
                 'authorized': True,
                 'authorized_by': user.username,
@@ -681,6 +707,14 @@ def quote_edit(request: HttpRequest, quote_id: int) -> HttpResponse:
         return redirect("sales:quote_list")
 
     if request.method == "POST":
+        # Retrato ANTES de ligar o formulário: `form.is_valid()` roda
+        # `_post_clean`, que já escreve os dados novos na instância — um retrato
+        # tirado depois compararia o orçamento com ele mesmo.
+        from core.audit import quote_financial_snapshot
+        before = quote_financial_snapshot(
+            Quote.objects.select_related("seller", "architect").get(pk=quote.pk)
+        )
+
         form = QuoteForm(request.POST, instance=quote)
         formset = QuoteItemFormSet(request.POST, request.FILES, instance=quote)
 
@@ -727,10 +761,18 @@ def quote_edit(request: HttpRequest, quote_id: int) -> HttpResponse:
                 if quote.status in SOLD_STATUSES:
                     persist_quote_commission(quote)
 
-            from core.models import AuditLog, AuditAction
-            AuditLog.log(request.user, AuditAction.EDIT_QUOTE,
-                         f"Orçamento {quote.number} editado", obj=quote,
-                         ip_address=request.META.get('REMOTE_ADDR'))
+            from core.audit import log_quote_diff
+            from core.models import AuditAction
+            # Instância nova: o signal post_save reescreve total_value_snapshot
+            # via .update(), então o objeto em memória ainda traz o total velho.
+            log_quote_diff(
+                request.user,
+                AuditAction.EDIT_QUOTE,
+                Quote.objects.select_related("seller", "architect").get(pk=quote.pk),
+                before,
+                description=f"Orçamento {quote.number} editado.",
+                ip_address=request.META.get('REMOTE_ADDR'),
+            )
 
             messages.success(request, f"Orçamento {quote.number} atualizado.")
             
@@ -756,7 +798,10 @@ def quote_detail(request: HttpRequest, quote_id: int) -> HttpResponse:
     quote = get_object_or_404(
         Quote.objects
         .select_related("customer", "seller")
-        .prefetch_related("items", "items__supplier", "orders", "orders__items"),
+        .prefetch_related(
+            "items", "items__supplier", "orders", "orders__items",
+            "commission_split__users",
+        ),
         id=quote_id,
     )
     if not _can_access_all_quotes(request.user) and quote.seller_id != request.user.id:
@@ -783,10 +828,26 @@ def quote_detail(request: HttpRequest, quote_id: int) -> HttpResponse:
         else set()
     )
 
+    from core.models import AuditLog
+    from sales.commission_split import split_participants
+
+    # Histórico da venda para o admin: o que mudou depois que ela fechou. É a
+    # resposta ao "deu divergência do papel pro programa, e agora?" — a correção
+    # continua livre, mas deixa rastro conferível.
+    quote_audit = (
+        AuditLog.objects
+        .filter(object_type="Quote", object_id=quote.id)
+        .select_related("user")[:15]
+        if _is_admin(request.user) else []
+    )
+
     return render(request, "sales/quote_detail.html", {
         "quote": quote,
         "sellers_for_split": sellers_for_split,
         "existing_split_ids": existing_split_ids,
+        "split_participants": split_participants(quote),
+        "can_edit_commission_split": _can_edit_commission_split(request.user, quote),
+        "quote_audit": quote_audit,
         "value_breakdown": _build_value_breakdown(quote),
         "today": timezone.localdate(),
         "is_seller": _is_seller(request.user),
@@ -840,23 +901,70 @@ def quote_set_sale_date(request: HttpRequest, quote_id: int) -> HttpResponse:
 
     old_date = quote.sale_date
     if new_date != old_date:
+        from core.audit import log_quote_diff, quote_financial_snapshot
+        from core.models import AuditAction
+
+        before = quote_financial_snapshot(quote)
         quote.sale_date = new_date
         quote.save(update_fields=["sale_date"])
 
-        from core.models import AuditLog, AuditAction
-        AuditLog.log(
+        log_quote_diff(
             request.user,
             AuditAction.EDIT_VALUES,
-            f"Data da venda do orçamento {quote.number} alterada de "
-            f"{old_date.strftime('%d/%m/%Y') if old_date else '—'} para "
-            f"{new_date.strftime('%d/%m/%Y')}.",
-            obj=quote,
+            quote,
+            before,
+            description=(
+                f"Data da venda do orçamento {quote.number} alterada de "
+                f"{old_date.strftime('%d/%m/%Y') if old_date else '—'} para "
+                f"{new_date.strftime('%d/%m/%Y')}."
+            ),
             ip_address=request.META.get('REMOTE_ADDR'),
         )
         messages.success(
             request,
             f"Data da venda atualizada para {new_date.strftime('%d/%m/%Y')}.",
         )
+
+    return redirect("sales:quote_detail", quote_id=quote.id)
+
+
+@login_required
+@require_http_methods(["POST"])
+def quote_commission_split_edit(request: HttpRequest, quote_id: int) -> HttpResponse:
+    """Edita quem divide a comissão da venda, em qualquer situação do orçamento.
+
+    Sem trava de status de propósito: a divisão só existia dentro do modal de
+    conversão, que desaparece assim que a venda fecha — era exatamente esse o
+    furo ("os vendedores não conseguem dividir comissão").
+
+    A comissão congelada NÃO é recalculada aqui. O valor foi apurado pelo motor
+    no fechamento; refazê-lo re-precificaria uma venda antiga com as tarifas de
+    hoje. Só muda entre quantas cabeças ele é repartido.
+    """
+    quote = get_object_or_404(Quote.objects.select_related("seller"), id=quote_id)
+    if not _can_edit_commission_split(request.user, quote):
+        return HttpResponseForbidden("Acesso negado.")
+
+    from core.audit import log_quote_diff, quote_financial_snapshot
+    from core.models import AuditAction
+    from sales.commission_split import apply_commission_split
+
+    before = quote_financial_snapshot(quote)
+    result = apply_commission_split(quote, request.POST.getlist("commission_seller_ids"))
+
+    if result["changed"]:
+        # Instância nova em vez de `refresh_from_db`: o retrato lê a relação
+        # reversa `commission_split`, que fica em cache no objeto antigo.
+        quote = Quote.objects.select_related("seller").get(pk=quote.pk)
+        log_quote_diff(
+            request.user,
+            AuditAction.EDIT_VALUES,
+            quote,
+            before,
+            description=f"Divisão de comissão do orçamento {quote.number} alterada.",
+            ip_address=request.META.get("REMOTE_ADDR"),
+        )
+        messages.success(request, "Divisão de comissão atualizada.")
 
     return redirect("sales:quote_detail", quote_id=quote.id)
 
@@ -1083,32 +1191,11 @@ def quote_convert_to_orders(request: HttpRequest, quote_id: int) -> HttpResponse
             # simulador — depois da venda os parâmetros podem mudar.
             persist_quote_commission(quote)
 
-            # Divisão de comissão: vendedores marcados dividem a comissão
-            # igualmente COM o vendedor do orçamento. Nenhum marcado = 100% ao
-            # vendedor original (não cria registro de divisão).
-            from accounts.models import Role
-            from django.contrib.auth import get_user_model
-            User = get_user_model()
-
-            selected_seller_ids: set[int] = set()
-            for raw in request.POST.getlist("commission_seller_ids"):
-                try:
-                    selected_seller_ids.add(int(raw))
-                except (TypeError, ValueError):
-                    continue
-            selected_seller_ids.discard(quote.seller_id)
-
-            valid_split_sellers = list(
-                User.objects.filter(
-                    pk__in=selected_seller_ids,
-                    is_active=True,
-                    role=Role.SELLER,
-                )
-            ) if selected_seller_ids else []
-
-            if valid_split_sellers:
-                split, _ = QuoteCommissionSplit.objects.get_or_create(quote=quote)
-                split.users.set([quote.seller, *valid_split_sellers])
+            # Divisão de comissão: vendedores marcados dividem igualmente COM o
+            # vendedor do orçamento. Nenhum marcado = 100% ao vendedor original.
+            # Mesmo caminho da edição pós-venda (sales.commission_split).
+            from sales.commission_split import apply_commission_split
+            apply_commission_split(quote, request.POST.getlist("commission_seller_ids"))
 
             if quote.has_architect:
                 reminder_date = timezone.localdate() + timedelta(days=30)
@@ -2535,6 +2622,12 @@ def order_edit(request: HttpRequest, order_id: int) -> HttpResponse:
         formset = OrderItemFormSet(request.POST, instance=order)
 
         if form.is_valid() and formset.is_valid():
+            from core.audit import diff_snapshots, quote_financial_snapshot
+            before = (
+                quote_financial_snapshot(order.quote)
+                if order.quote_id else None
+            )
+
             with transaction.atomic():
                 form.save()
                 formset.save()
@@ -2573,12 +2666,23 @@ def order_edit(request: HttpRequest, order_id: int) -> HttpResponse:
                         )
 
             from core.models import AuditLog, AuditAction
+            # Editar a data do pedido pode mover a venda de ciclo de comissão
+            # (bloco acima). Sem o diff o log dizia só "pedido editado" e a
+            # venda mudava de mês sem deixar pista.
+            extra = {}
+            if before is not None:
+                fresh = Quote.objects.select_related("seller", "architect").get(pk=order.quote_id)
+                changes = diff_snapshots(before, quote_financial_snapshot(fresh))
+                if changes:
+                    extra = {"quote": fresh.number, "diff": changes}
+
             AuditLog.log(
                 request.user,
                 AuditAction.EDIT_VALUES,
                 f"Pedido {order.number} editado ({order.supplier.name if order.supplier else 'pedido total'}).",
                 obj=order.quote,
                 ip_address=request.META.get('REMOTE_ADDR'),
+                extra_data=extra,
             )
 
             messages.success(request, f"Pedido {order.number} atualizado.")
@@ -3034,6 +3138,11 @@ def quote_simulate_commission(request: HttpRequest, quote_id: int) -> HttpRespon
             ctx['can_view_commission'] = _can_view_commission(request.user)
             ctx['is_admin'] = _is_admin(request.user)
             return render(request, 'sales/quote_simulation.html', ctx)
+
+        from core.audit import log_quote_diff, quote_financial_snapshot
+        from core.models import AuditAction
+        before = quote_financial_snapshot(quote)
+
         with transaction.atomic():
             if pricing_tier == PriceTier.RETAIL:
                 quote.discount_percent = ctx['discount_percent']
@@ -3062,6 +3171,18 @@ def quote_simulate_commission(request: HttpRequest, quote_id: int) -> HttpRespon
             # precisa acompanhar.
             if quote.status in SOLD_STATUSES:
                 persist_quote_commission(quote)
+        # Este ramo reescreve desconto, acréscimo, as duas formas de pagamento,
+        # a entrada e recongela a comissão — e até aqui não deixava rastro
+        # nenhum: a ação SAVE_CONDITIONS existia sem nunca ser emitida.
+        log_quote_diff(
+            request.user,
+            AuditAction.SAVE_CONDITIONS,
+            Quote.objects.select_related("seller", "architect").get(pk=quote.pk),
+            before,
+            description=f"Condições do orçamento {quote.number} salvas.",
+            ip_address=request.META.get('REMOTE_ADDR'),
+        )
+
         request.session[save_session_key] = True
         messages.success(request, f"Condições do orçamento {quote.number} salvas com sucesso.")
         return redirect("sales:quote_detail", quote_id=quote.id)

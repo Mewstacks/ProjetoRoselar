@@ -1170,3 +1170,343 @@ class DualPricingTests(TestCase):
             for page in PdfReader(BytesIO(resp.content)).pages
         )
         self.assertLess(text.index("Dormitório"), text.index("Sala"))
+
+
+class CommissionSplitEditTests(TestCase):
+    """A divisão precisa ser editável DEPOIS que a venda fecha.
+
+    Até aqui ela só existia dentro do modal de conversão, escondido por
+    `status != CONVERTED` — fechada a venda, ninguém mais conseguia mexer.
+    """
+
+    def setUp(self):
+        from core.models import Customer
+
+        self.customer = Customer.objects.create(name="Cliente Divisão")
+        self.seller = User.objects.create_user(username="dono", password="x", role="SELLER")
+        self.other = User.objects.create_user(username="parceiro", password="x", role="SELLER")
+        self.stranger = User.objects.create_user(username="alheio", password="x", role="SELLER")
+        self.admin = User.objects.create_user(username="chefe", password="x", role="ADMIN")
+        self.finance = User.objects.create_user(username="caixa", password="x", role="FINANCE")
+        self.quote = Quote.objects.create(
+            number="ORC-DIV",
+            customer=self.customer,
+            seller=self.seller,
+            status=QuoteStatus.CONVERTED,
+            sale_date=date(2026, 8, 27),
+        )
+
+    def _url(self):
+        return reverse("sales:quote_commission_split", args=[self.quote.id])
+
+    def _sellers(self):
+        from sales.models import QuoteCommissionSplit
+
+        split = QuoteCommissionSplit.objects.filter(quote=self.quote).first()
+        return sorted(u.username for u in split.users.all()) if split else []
+
+    def test_owner_can_split_a_sold_quote(self):
+        self.client.login(username="dono", password="x")
+        resp = self.client.post(self._url(), {"commission_seller_ids": [self.other.pk]})
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(self._sellers(), ["dono", "parceiro"])
+
+    def test_admin_can_split_a_sold_quote(self):
+        self.client.login(username="chefe", password="x")
+        self.client.post(self._url(), {"commission_seller_ids": [self.other.pk]})
+
+        self.assertEqual(self._sellers(), ["dono", "parceiro"])
+
+    def test_split_edit_allowed_on_pos_venda(self):
+        self.quote.status = QuoteStatus.POS_VENDA
+        self.quote.save(update_fields=["status"])
+
+        self.client.login(username="dono", password="x")
+        self.client.post(self._url(), {"commission_seller_ids": [self.other.pk]})
+
+        self.assertEqual(self._sellers(), ["dono", "parceiro"])
+
+    def test_other_seller_gets_403(self):
+        self.client.login(username="alheio", password="x")
+        resp = self.client.post(self._url(), {"commission_seller_ids": [self.stranger.pk]})
+
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(self._sellers(), [])
+
+    def test_finance_cannot_rewrite_who_gets_paid(self):
+        """Financeiro aprova a venda, não decide quem recebe por ela."""
+        self.client.login(username="caixa", password="x")
+        resp = self.client.post(self._url(), {"commission_seller_ids": [self.other.pk]})
+
+        self.assertEqual(resp.status_code, 403)
+
+    def test_finance_user_is_never_accepted_as_a_participant(self):
+        self.client.login(username="dono", password="x")
+        self.client.post(self._url(), {"commission_seller_ids": [self.finance.pk]})
+
+        # Nenhum participante válido: a linha não é criada.
+        self.assertEqual(self._sellers(), [])
+
+    def test_convert_and_endpoint_produce_the_same_split(self):
+        from sales.commission_split import apply_commission_split
+
+        apply_commission_split(self.quote, [str(self.other.pk)])
+        via_helper = self._sellers()
+
+        self.client.login(username="dono", password="x")
+        self.client.post(self._url(), {"commission_seller_ids": []})
+        self.client.post(self._url(), {"commission_seller_ids": [self.other.pk]})
+
+        self.assertEqual(self._sellers(), via_helper)
+
+    def test_split_edit_writes_an_audit_entry(self):
+        from core.models import AuditAction, AuditLog
+
+        self.client.login(username="dono", password="x")
+        self.client.post(self._url(), {"commission_seller_ids": [self.other.pk]})
+
+        log = AuditLog.objects.filter(action=AuditAction.EDIT_VALUES).first()
+        self.assertIsNotNone(log)
+        self.assertEqual(
+            log.extra_data["diff"]["Divisão de comissão"],
+            {"de": "—", "para": "dono, parceiro"},
+        )
+
+
+class QuoteAuditDiffTests(TestCase):
+    """`EDIT_QUOTE` gravava só "Orçamento X editado": nunca o que mudou.
+
+    Sem o antes/depois não há como conferir a correção de uma divergência entre
+    a venda anotada no papel e a que está no sistema.
+    """
+
+    def setUp(self):
+        from core.models import Customer
+
+        self.customer = Customer.objects.create(name="Cliente Auditoria")
+        self.admin = User.objects.create_user(username="chefe", password="x", role="ADMIN")
+        self.quote = Quote.objects.create(
+            number="ORC-AUD",
+            customer=self.customer,
+            seller=self.admin,
+            status=QuoteStatus.CONVERTED,
+            quote_date=date(2026, 8, 1),
+            sale_date=date(2026, 8, 27),
+            discount_percent=Decimal("10.0"),
+        )
+        self.item = self.quote.items.create(
+            product_name="Mesa", quantity=1, unit_value=Decimal("1000.00"),
+        )
+        self.client.login(username="chefe", password="x")
+
+    def _payload(self, **over):
+        data = {
+            "customer": self.customer.id,
+            "quote_date": "2026-08-01",
+            "sale_date": "2026-08-27",
+            "freight_responsible": "CUSTOMER",
+            "discount_percent": "10.0",
+            "payment_type": "",
+            "total_override": "",
+            "notes": "",
+            "items-TOTAL_FORMS": "1",
+            "items-INITIAL_FORMS": "1",
+            "items-MIN_NUM_FORMS": "0",
+            "items-MAX_NUM_FORMS": "1000",
+            "items-0-id": self.item.id,
+            "items-0-quote": self.quote.id,
+            "items-0-product_name": "Mesa",
+            "items-0-description": "",
+            "items-0-environment": "",
+            "items-0-quantity": "1",
+            "items-0-unit_value": "1000.00",
+            "items-0-unit_value_wholesale": "",
+            "items-0-architect_percent": "0",
+        }
+        data.update(over)
+        return data
+
+    def _edit(self, **over):
+        return self.client.post(
+            reverse("sales:quote_edit", args=[self.quote.id]), self._payload(**over)
+        )
+
+    def _logs(self):
+        from core.models import AuditAction, AuditLog
+
+        return AuditLog.objects.filter(action=AuditAction.EDIT_QUOTE)
+
+    def test_quote_edit_logs_before_and_after(self):
+        resp = self._edit(discount_percent="15.0")
+        self.assertEqual(resp.status_code, 302)
+
+        diff = self._logs().first().extra_data["diff"]
+        self.assertEqual(diff["Desconto (%)"], {"de": "10.0", "para": "15.0"})
+
+    def test_unchanged_save_writes_no_audit_row(self):
+        # A primeira edição apura a comissão de uma venda que ainda não tinha —
+        # isso é mudança de verdade. A segunda não muda nada.
+        self._edit()
+        first = self._logs().count()
+
+        self._edit()
+
+        self.assertEqual(self._logs().count(), first)
+
+    def test_item_changes_are_compacted(self):
+        self._edit(**{
+            "items-TOTAL_FORMS": "2",
+            "items-1-product_name": "Cadeira",
+            "items-1-description": "",
+            "items-1-environment": "",
+            "items-1-quantity": "4",
+            "items-1-unit_value": "250.00",
+            "items-1-unit_value_wholesale": "",
+            "items-1-architect_percent": "0",
+            "items-0-DELETE": "on",
+        })
+
+        diff = self._logs().first().extra_data["diff"]
+        self.assertEqual(diff["Itens incluídos"]["para"], "Cadeira x4 @250.00")
+        self.assertEqual(diff["Itens removidos"]["de"], "Mesa x1 @1000.00")
+        self.assertNotIn("Itens alterados", diff)
+
+    def test_audit_payload_is_json_serializable(self):
+        """sqlite engole Decimal cru; o Postgres da produção estoura."""
+        import json
+
+        self._edit(discount_percent="15.0")
+
+        json.dumps(self._logs().first().extra_data)
+
+    def test_sale_date_change_records_the_cycle_move(self):
+        from core.models import AuditAction, AuditLog
+
+        self.client.post(
+            reverse("sales:quote_set_sale_date", args=[self.quote.id]),
+            {"sale_date": "2026-07-20"},
+        )
+
+        log = AuditLog.objects.filter(action=AuditAction.EDIT_VALUES).first()
+        self.assertEqual(
+            log.extra_data["diff"]["Data da venda"],
+            {"de": "2026-08-27", "para": "2026-07-20"},
+        )
+
+
+class CommissionSplitPanelRenderTests(TestCase):
+    """O painel tem que existir na tela da venda, fora do modal de conversão."""
+
+    def setUp(self):
+        from core.models import Customer
+
+        self.customer = Customer.objects.create(name="Cliente Painel")
+        self.seller = User.objects.create_user(username="dono", password="x", role="SELLER")
+        self.other = User.objects.create_user(username="parceiro", password="x", role="SELLER")
+        self.finance = User.objects.create_user(username="caixa", password="x", role="FINANCE")
+        self.quote = Quote.objects.create(
+            number="ORC-PAINEL",
+            customer=self.customer,
+            seller=self.seller,
+            status=QuoteStatus.CONVERTED,
+            sale_date=date(2026, 8, 27),
+            commission_value=Decimal("100.00"),
+            commission_pct=Decimal("4.00"),
+        )
+        self.quote.items.create(product_name="Mesa", quantity=1, unit_value=Decimal("2500.00"))
+
+    def _get(self):
+        return self.client.get(reverse("sales:quote_detail", args=[self.quote.id]))
+
+    def test_panel_is_rendered_for_a_sold_quote(self):
+        self.client.login(username="dono", password="x")
+        resp = self._get()
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Divisão de Comissão")
+        self.assertContains(resp, reverse("sales:quote_commission_split", args=[self.quote.id]))
+        # Cota do próprio vendedor, sozinho na venda.
+        self.assertContains(resp, "R$ 100,00")
+
+    def test_panel_shows_each_share_after_a_split(self):
+        from sales.commission_split import apply_commission_split
+
+        apply_commission_split(self.quote, [str(self.other.pk)])
+
+        self.client.login(username="dono", password="x")
+        resp = self._get()
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "R$ 50,00", count=2)
+
+    def test_finance_does_not_see_the_panel(self):
+        self.client.login(username="caixa", password="x")
+        resp = self._get()
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "Divisão de Comissão")
+
+    def test_draft_quote_has_no_panel(self):
+        self.quote.status = QuoteStatus.DRAFT
+        self.quote.save(update_fields=["status"])
+
+        self.client.login(username="dono", password="x")
+        resp = self._get()
+
+        self.assertNotContains(resp, reverse("sales:quote_commission_split", args=[self.quote.id]))
+
+
+class AuditLogPageTests(TestCase):
+    """A coluna Data lia `log.timestamp`; o campo é `created_at` — saía vazia."""
+
+    def setUp(self):
+        self.admin = User.objects.create_user(username="chefe", password="x", role="ADMIN")
+        self.seller = User.objects.create_user(username="dono", password="x", role="SELLER")
+        self.client.login(username="chefe", password="x")
+
+    def test_page_renders_the_date_and_the_diff(self):
+        from core.models import AuditAction, AuditLog
+
+        AuditLog.log(
+            self.admin,
+            AuditAction.EDIT_QUOTE,
+            "Orçamento ORC-1 editado.",
+            extra_data={"quote": "ORC-1", "diff": {"Desconto (%)": {"de": "10.0", "para": "15.0"}}},
+        )
+
+        resp = self.client.get(reverse("core:audit_log_list"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Desconto (%)")
+        self.assertContains(resp, "15.0")
+        # Data preenchida: a linha traz o ano corrente do registro.
+        self.assertContains(resp, timezone.localdate().strftime("%d/%m/%Y"))
+
+    def test_quote_filter_narrows_the_list(self):
+        from core.models import AuditAction, AuditLog
+        from core.models import Customer
+
+        customer = Customer.objects.create(name="Cliente Filtro")
+        alvo = Quote.objects.create(
+            number="ORC-ALVO", customer=customer, seller=self.seller,
+            status=QuoteStatus.CONVERTED, sale_date=date(2026, 8, 27),
+        )
+        outro = Quote.objects.create(
+            number="ORC-OUTRO", customer=customer, seller=self.seller,
+            status=QuoteStatus.CONVERTED, sale_date=date(2026, 8, 27),
+        )
+        AuditLog.log(self.admin, AuditAction.EDIT_QUOTE, "alvo", obj=alvo)
+        AuditLog.log(self.admin, AuditAction.EDIT_QUOTE, "outro", obj=outro)
+
+        resp = self.client.get(reverse("core:audit_log_list"), {"q": "ALVO"})
+
+        self.assertEqual(len(resp.context["logs"]), 1)
+        self.assertContains(resp, "alvo")
+        self.assertNotContains(resp, "ORC-OUTRO")
+
+    def test_seller_is_denied(self):
+        self.client.login(username="dono", password="x")
+        resp = self.client.get(reverse("core:audit_log_list"))
+
+        self.assertEqual(resp.status_code, 302)

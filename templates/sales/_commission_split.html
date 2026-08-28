@@ -1,0 +1,43 @@
+{% comment %}
+Painel da divisão de comissão na venda fechada.
+
+Fica fora de qualquer trava de status de propósito: até aqui a divisão só
+existia dentro do modal de conversão, que some quando o orçamento vira venda —
+depois disso ninguém conseguia ver nem mudar quem recebe.
+{% endcomment %}
+<div class="s-card fi fi-5">
+  <div class="s-hdr">
+    <div class="s-icon muted"><i class="fa-solid fa-percent"></i></div>
+    Divisão de Comissão
+  </div>
+  <div class="s-body">
+    {% for p in split_participants %}
+      <div class="r-line">
+        <span class="r-l">
+          {{ p.name }}
+          {% if p.is_inactive %}<span class="badge bg-secondary ms-1" style="font-size:.62rem;">Inativo</span>{% endif %}
+          {% if p.is_finance %}<span class="badge bg-secondary ms-1" style="font-size:.62rem;">Financeiro</span>{% endif %}
+        </span>
+        <span style="font-weight:800;font-variant-numeric:tabular-nums;">
+          {% if p.share is not None %}R$ {{ p.share|floatformat:2 }}{% else %}&mdash;{% endif %}
+        </span>
+      </div>
+    {% endfor %}
+    {% if is_admin and quote.commission_value is not None %}
+      <div class="r-line">
+        <span class="r-l">Total</span>
+        <span style="font-weight:800;font-variant-numeric:tabular-nums;">R$ {{ quote.commission_value|floatformat:2 }}</span>
+      </div>
+    {% endif %}
+
+    {% if can_edit_commission_split %}
+      <form method="post" action="{% url 'sales:quote_commission_split' quote.id %}" style="margin-top:.75rem;">
+        {% csrf_token %}
+        {% include "sales/_commission_split_fields.html" %}
+        <button type="submit" class="btn-a secondary" style="margin-top:.55rem;">
+          <i class="fa-solid fa-check"></i>Salvar
+        </button>
+      </form>
+    {% endif %}
+  </div>
+</div>
