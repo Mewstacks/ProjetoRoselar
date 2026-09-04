@@ -66,6 +66,25 @@ class QuoteForm(forms.ModelForm):
             return None
         return val
 
+    # Preço final à vista. Mesmo parser e mesma leitura de zero do campo acima;
+    # vazio = o orçamento não oferece condição à vista.
+    total_cash_override = forms.CharField(
+        required=False,
+        widget=forms.TextInput(attrs={"class": "form-control", "inputmode": "numeric", "placeholder": "0,00"}),
+        label="Preço Final à Vista (R$)",
+    )
+
+    def clean_total_cash_override(self):
+        raw = self.cleaned_data.get('total_cash_override', '')
+        if raw is None or str(raw).strip() == '':
+            return None
+        val = parse_brl_decimal(raw, 'preço final à vista')
+        if val < 0:
+            raise forms.ValidationError('O preço final à vista não pode ser negativo.')
+        if val == 0:
+            return None
+        return val
+
     class Meta:
         model = Quote
         fields = [
@@ -84,6 +103,7 @@ class QuoteForm(forms.ModelForm):
             "payment_installments",
             "payment_fee_percent",
             "total_override",
+            "total_cash_override",
             "dual_pricing",
             "selected_price_tier",
             "notes",
@@ -111,6 +131,7 @@ class QuoteForm(forms.ModelForm):
         self.fields['payment_installments'].required = False
         self.fields['payment_fee_percent'].required = False
         self.fields['total_override'].required = False
+        self.fields['total_cash_override'].required = False
         self.fields['dual_pricing'].required = False
         self.fields['selected_price_tier'].required = False
         self.fields['notes'].required = False
@@ -155,6 +176,19 @@ class QuoteForm(forms.ModelForm):
             or cleaned.get("selected_price_tier") not in PriceTier.values
         ):
             cleaned["selected_price_tier"] = PriceTier.RETAIL
+
+        # À vista maior que a prazo é sempre digitação trocada — barrar aqui
+        # evita a proposta sair com o desconto invertido.
+        cash = cleaned.get('total_cash_override')
+        if cash is not None:
+            installment = cleaned.get('total_override')
+            if installment is None and self.instance.pk:
+                installment = self.instance.calculate_rounded_total()
+            if installment is not None and cash > installment:
+                self.add_error(
+                    'total_cash_override',
+                    'O preço à vista não pode ser maior que o preço a prazo.',
+                )
 
         # Datas em branco não apagam o valor existente (evita venda "sumir"
         # dos painéis por submit sem a data preenchida).

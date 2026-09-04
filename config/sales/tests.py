@@ -1510,3 +1510,142 @@ class AuditLogPageTests(TestCase):
         resp = self.client.get(reverse("core:audit_log_list"))
 
         self.assertEqual(resp.status_code, 302)
+
+
+class CashPriceTests(TestCase):
+    """Preço à vista digitado ao lado do preço a prazo.
+
+    O valor à vista é um segundo preço final digitado (não um percentual: a
+    taxa bancária é custo da loja e nunca produziu diferença calculável entre
+    as duas condições). Quando a venda fecha à vista, esse preço passa a ser o
+    valor da venda — snapshot, margem e comissão têm de acompanhar.
+    """
+
+    def setUp(self):
+        from core.models import Customer, PaymentTariff
+
+        PaymentTariff.objects.all().delete()
+        PaymentTariff.objects.create(payment_type="PIX", installments=1,
+                                     fee_percent=Decimal("0.00"))
+        self.seller = User.objects.create_user(username="v-cash", password="x", role="SELLER")
+        cust = Customer.objects.create(name="Cliente")
+        self.quote = Quote.objects.create(
+            number="ORC-9400", customer=cust, seller=self.seller,
+            status=QuoteStatus.DRAFT, freight_responsible="CUSTOMER",
+            payment_type="PIX", payment_installments=1,
+        )
+        self.quote.items.create(product_name="Sofá", quantity=1,
+                                unit_value=Decimal("2500.00"))
+        self.quote.refresh_from_db()
+
+    def _set_cash(self, value):
+        self.quote.total_cash_override = value
+        self.quote.save(update_fields=["total_cash_override"])
+        self.quote.refresh_from_db()
+
+    def _close_as(self, terms):
+        from sales.models import PaymentTerms
+
+        self.quote.selected_payment_terms = terms
+        self.quote.save()
+        self.quote.refresh_from_db()
+
+    def test_sem_preco_a_vista_nada_muda(self):
+        self.assertIsNone(self.quote.calculate_rounded_total_cash())
+        self.assertEqual(self.quote.calculate_total_for_tier(), Decimal("2500.00"))
+
+    def test_zero_nao_e_preco_a_vista(self):
+        self._set_cash(Decimal("0.00"))
+        self.assertIsNone(self.quote.effective_cash_override)
+        self.assertIsNone(self.quote.calculate_rounded_total_cash())
+
+    def test_preco_a_vista_nao_muda_o_total_ate_fechar(self):
+        self._set_cash(Decimal("2375.00"))
+        self.assertEqual(self.quote.calculate_total_for_tier(), Decimal("2500.00"))
+        self.assertEqual(self.quote.total_value_snapshot, Decimal("2500.00"))
+
+    def test_fechar_a_vista_vira_o_valor_da_venda(self):
+        from sales.models import PaymentTerms
+
+        self._set_cash(Decimal("2375.00"))
+        self._close_as(PaymentTerms.CASH)
+        self.assertEqual(self.quote.calculate_total_for_tier(), Decimal("2375.00"))
+        self.assertEqual(self.quote.total_value_snapshot, Decimal("2375.00"))
+
+    def test_fechar_a_vista_sem_preco_digitado_cai_no_a_prazo(self):
+        from sales.models import PaymentTerms
+
+        self._close_as(PaymentTerms.CASH)
+        self.assertEqual(self.quote.calculate_total_for_tier(), Decimal("2500.00"))
+
+    def test_margem_e_comissao_seguem_o_preco_a_vista(self):
+        from sales.margin import simulate_quote
+        from sales.models import PaymentTerms
+
+        self._set_cash(Decimal("2375.00"))
+        a_prazo = simulate_quote(self.quote)
+        self._close_as(PaymentTerms.CASH)
+        a_vista = simulate_quote(self.quote)
+
+        self.assertEqual(a_prazo["final_total"], Decimal("2500.00"))
+        self.assertEqual(a_vista["final_total"], Decimal("2375.00"))
+        self.assertLess(a_vista["seller_commission_value"],
+                        a_prazo["seller_commission_value"])
+
+    def test_atacado_ignora_o_preco_a_vista(self):
+        from sales.models import PaymentTerms, PriceTier
+
+        self.quote.dual_pricing = True
+        self.quote.selected_price_tier = PriceTier.WHOLESALE
+        self.quote.total_cash_override = Decimal("2375.00")
+        self.quote.selected_payment_terms = PaymentTerms.CASH
+        self.quote.save()
+        self.quote.refresh_from_db()
+        self.assertEqual(self.quote.calculate_total_for_tier(),
+                         self.quote.calculate_rounded_total_wholesale())
+
+    def test_formulario_grava_none_em_vez_de_zero(self):
+        from sales.forms import QuoteForm
+
+        for digitado in ("0", "0,00", "0.00"):
+            form = QuoteForm(data={"total_cash_override": digitado})
+            form.is_valid()
+            self.assertIsNone(
+                form.cleaned_data.get("total_cash_override"),
+                msg=f"{digitado!r} deveria virar None",
+            )
+
+    def test_formulario_barra_a_vista_maior_que_a_prazo(self):
+        from sales.forms import QuoteForm
+
+        form = QuoteForm(
+            data={"total_override": "2.300,00", "total_cash_override": "2.400,00"},
+            instance=self.quote,
+        )
+        form.is_valid()
+        self.assertIn("total_cash_override", form.errors)
+
+    def test_pdf_do_cliente_traz_as_duas_condicoes_e_as_observacoes(self):
+        self.quote.notes = "Prazo conta da confirmação do pagamento."
+        self.quote.total_cash_override = Decimal("2375.00")
+        self.quote.save()
+
+        self.client.force_login(self.seller)
+        resp = self.client.get(
+            reverse("sales:quote_pdf_client", args=[self.quote.id])
+        )
+        self.assertEqual(resp.status_code, 200)
+
+        try:
+            import fitz
+        except ImportError:  # pymupdf não é dependência do projeto
+            self.skipTest("pymupdf ausente: sem como ler o texto do PDF")
+
+        doc = fitz.open(stream=resp.content, filetype="pdf")
+        texto = "".join(page.get_text() for page in doc)
+        doc.close()
+        # `_draw_spaced` desenha caractere a caractere: o rótulo sai espaçado.
+        self.assertIn("A prazo", texto)
+        self.assertIn("À vista", texto)
+        self.assertIn("R$ 2.375,00", texto)
+        self.assertIn("O B S E R V A", texto)

@@ -27,7 +27,12 @@ def backfill_commissions(apps, schema_editor):
         # Estes campos só são adicionados em migrações posteriores. Como este
         # backfill usa o modelo Python atual, precisam ficar fora do SELECT ao
         # reconstruir um banco do zero.
-        .defer("selected_price_tier", "submission_token")
+        .defer(
+            "selected_price_tier",
+            "submission_token",
+            "total_cash_override",
+            "selected_payment_terms",
+        )
         .prefetch_related("items")
     )
 

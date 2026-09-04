@@ -691,11 +691,19 @@
                 </div>
                 <div class="row">
                   <div class="col-md-6 mb-3">
-                    <label for="{{ form.total_override.id_for_label }}" class="form-label fw-bold">Preço Final ao Cliente (R$)</label>
+                    <label for="{{ form.total_override.id_for_label }}" class="form-label fw-bold">Preço final &mdash; a prazo (R$)</label>
                     {{ form.total_override }}
-                    <small class="text-muted">Valor exato do total ao cliente. Deixe em branco para usar o total calculado.</small>
+                    <small class="text-muted">Em branco usa o total calculado.</small>
                     {% if form.total_override.errors %}
                       <div class="text-danger small">{{ form.total_override.errors }}</div>
+                    {% endif %}
+                  </div>
+                  <div class="col-md-6 mb-3">
+                    <label for="{{ form.total_cash_override.id_for_label }}" class="form-label fw-bold">Preço final &mdash; à vista (R$)</label>
+                    {{ form.total_cash_override }}
+                    <small class="text-muted">Em branco não mostra à vista.</small>
+                    {% if form.total_cash_override.errors %}
+                      <div class="text-danger small">{{ form.total_cash_override.errors }}</div>
                     {% endif %}
                   </div>
                   <div class="col-md-12 mb-1">
@@ -1553,7 +1561,7 @@
       // Sem a máscara, digitar "2.300" chegava ao servidor como "2.300" e o
       // parser BR — que só troca separadores quando há vírgula — gravava R$ 2,30.
       document.querySelectorAll(
-        'input[name="freight_value"], input[name="total_override"]'
+        'input[name="freight_value"], input[name="total_override"], input[name="total_cash_override"]'
       ).forEach(moneyInput => {
         if (moneyInput.value && moneyInput.value.includes('.')) {
           const parts = moneyInput.value.split('.');
@@ -1714,7 +1722,7 @@
         // Converte os demais campos monetários sem alterar um valor que já
         // tenha sido normalizado por um envio anterior.
         quoteForm.querySelectorAll(
-          'input[name="freight_value"], input[name="total_override"]'
+          'input[name="freight_value"], input[name="total_override"], input[name="total_cash_override"]'
         ).forEach(input => {
           if (input.value) input.value = normalizeCurrencyForSubmit(input.value);
         });

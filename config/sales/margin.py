@@ -688,7 +688,7 @@ def simulate_quote(quote) -> dict:
     que o vendedor enxerga — mesmo subtotal, mesmo frete faturável, mesmas pernas
     de pagamento, mesma entrada.
     """
-    from sales.models import PriceTier
+    from sales.models import PaymentTerms, PriceTier
 
     # Migrações históricas 0028/0029 usam o modelo real antes de campos mais
     # novos existirem fisicamente. Ler de __dict__ mantém o backfill compatível
@@ -697,6 +697,11 @@ def simulate_quote(quote) -> dict:
         quote.__dict__.get("selected_price_tier", PriceTier.RETAIL)
         if quote.dual_pricing
         else PriceTier.RETAIL
+    )
+    sold_cash = (
+        "total_cash_override" in quote.__dict__
+        and quote.__dict__.get("selected_payment_terms") == PaymentTerms.CASH
+        and quote.effective_cash_override is not None
     )
     return _build_simulation_context(
         subtotal=quote.calculate_subtotal_for_tier(selected_tier),
@@ -720,9 +725,11 @@ def simulate_quote(quote) -> dict:
         price_increase_pct_2=Decimal("0"),
         down_payment_value=quote.down_payment_value or None,
         # O preço final digitado se refere só ao varejo (mesma regra de
-        # Quote.calculate_rounded_total_wholesale, que o ignora).
+        # Quote.calculate_rounded_total_wholesale, que o ignora). Venda fechada
+        # à vista: o preço à vista é o valor da venda, então é ele que vira a
+        # base de margem e comissão.
         total_override=(
-            quote.effective_total_override
+            (quote.effective_cash_override if sold_cash else quote.effective_total_override)
             if selected_tier == PriceTier.RETAIL
             and "total_override" in quote.__dict__
             else None

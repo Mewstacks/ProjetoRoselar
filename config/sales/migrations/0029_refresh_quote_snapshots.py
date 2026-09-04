@@ -25,7 +25,12 @@ def refresh_snapshots(apps, schema_editor):
     for quote in (
         # Campos criados depois desta migração não existem ainda ao reconstruir
         # um banco do zero, embora o modelo Python atual já os conheça.
-        Quote.objects.defer("selected_price_tier", "submission_token")
+        Quote.objects.defer(
+            "selected_price_tier",
+            "submission_token",
+            "total_cash_override",
+            "selected_payment_terms",
+        )
         .prefetch_related("items")
         .iterator(chunk_size=200)
     ):

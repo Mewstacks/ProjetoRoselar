@@ -50,6 +50,19 @@ class PriceTier(models.TextChoices):
     WHOLESALE = "WHOLESALE", "Atacado"
 
 
+class PaymentTerms(models.TextChoices):
+    """Condição de pagamento apresentada ao cliente.
+
+    Eixo independente de PriceTier: o cliente escolhe a tabela (varejo/atacado)
+    e, dentro dela, se paga à vista ou a prazo. O preço à vista é digitado
+    (Quote.total_cash_override), não derivado de percentual — taxa bancária é
+    custo da loja e nunca gerou diferença calculável entre as duas condições.
+    """
+
+    INSTALLMENT = "PRAZO", "A prazo"
+    CASH = "AVISTA", "À vista"
+
+
 # Status que contam como venda em métricas e relatórios. Um orçamento
 # convertido continua sendo venda depois que o pedido é concluído e ele
 # avança para Pós-Venda — sem isso, a venda "sumiria" dos painéis.
@@ -359,6 +372,18 @@ class Quote(models.Model):
         help_text="Valor exato do total ao cliente. Deixe em branco para usar o total calculado.",
     )
 
+    # preço final à vista: segundo valor digitado, irmão de total_override.
+    # Em branco, o orçamento não oferece condição à vista e tudo se comporta
+    # como antes. Vale só para o varejo, mesma regra do total_override.
+    total_cash_override = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name="Preço Final à Vista (R$)",
+        help_text="Valor exato do total à vista. Deixe em branco para não oferecer à vista.",
+    )
+
     # ── legado (mantidos por compatibilidade; não exibidos na UI) ────────────
     total_rounding_mode = models.CharField(
         max_length=5,
@@ -389,6 +414,13 @@ class Quote(models.Model):
         default=PriceTier.RETAIL,
         verbose_name="Modalidade Fechada",
         help_text="Preço efetivamente escolhido pelo cliente na conversão da venda.",
+    )
+    selected_payment_terms = models.CharField(
+        max_length=6,
+        choices=PaymentTerms.choices,
+        default=PaymentTerms.INSTALLMENT,
+        verbose_name="Condição Fechada",
+        help_text="Condição efetivamente escolhida pelo cliente na conversão da venda.",
     )
 
     # observações gerais do orçamento
@@ -546,6 +578,25 @@ class Quote(models.Model):
             return None
         return override
 
+    @property
+    def effective_cash_override(self) -> Decimal | None:
+        """Preço à vista digitado, ou None quando não há um.
+
+        Mesma leitura de effective_total_override: zero é ausência, não preço.
+        """
+        override = self.total_cash_override
+        if override is None or override <= Decimal("0.00"):
+            return None
+        return override
+
+    def calculate_rounded_total_cash(self) -> Decimal | None:
+        """Total à vista ao cliente, ou None quando o orçamento não oferece.
+
+        Valor digitado puro: não passa por arredondamento, desconto nem frete —
+        quem digita já digita o número final que o cliente vê.
+        """
+        return self.effective_cash_override
+
     def apply_client_rounding(self, base: Decimal, use_override: bool = True) -> Decimal:
         """Total de venda ao cliente a partir de um valor base.
 
@@ -604,10 +655,21 @@ class Quote(models.Model):
         return self.calculate_subtotal()
 
     def calculate_total_for_tier(self, tier: str | None = None) -> Decimal:
-        """Total final da modalidade informada ou efetivamente fechada."""
+        """Total final da modalidade informada ou efetivamente fechada.
+
+        Quando a venda fecha à vista no varejo, o preço à vista É o valor da
+        venda. Aqui é o único ponto que precisa saber disso: o snapshot
+        (_refresh_quote_snapshot) sai daqui, e todos os relatórios leem o
+        snapshot. O atacado ignora o preço à vista, mesma regra do
+        total_override em calculate_rounded_total_wholesale.
+        """
         tier = tier or self.selected_price_tier
         if self.dual_pricing and tier == PriceTier.WHOLESALE:
             return self.calculate_rounded_total_wholesale()
+        if self.selected_payment_terms == PaymentTerms.CASH:
+            cash_total = self.calculate_rounded_total_cash()
+            if cash_total is not None:
+                return cash_total
         return self.calculate_rounded_total()
 
     def get_payment_plans(self) -> list[dict]:

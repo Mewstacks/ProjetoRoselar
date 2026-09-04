@@ -150,6 +150,21 @@ def _build_value_breakdown(quote):
         "selected_price_tier": selected_tier,
         "selected_price_tier_label": PriceTier(selected_tier).label,
         "payment_plans": quote.get_payment_plans(),
+        # Preço à vista: só existe no varejo e só quando foi digitado. O total
+        # a prazo é sempre o calculado/override, mesmo depois de a venda fechar
+        # à vista — as duas linhas precisam continuar visíveis lado a lado.
+        "cash_total": (
+            quote.calculate_rounded_total_cash()
+            if selected_tier == PriceTier.RETAIL
+            else None
+        ),
+        "installment_total": quote.calculate_rounded_total(),
+        "selected_payment_terms": quote.selected_payment_terms,
+        "sold_cash": (
+            selected_tier == PriceTier.RETAIL
+            and quote.selected_payment_terms == PaymentTerms.CASH
+            and quote.calculate_rounded_total_cash() is not None
+        ),
     }
     if quote.dual_pricing:
         breakdown["rounded_total_retail"] = quote.calculate_rounded_total()
@@ -360,6 +375,7 @@ from .forms import QuoteForm, QuoteItemFormSet, OrderForm, OrderItemFormSet
 from .models import (
     Quote,
     QuoteStatus,
+    PaymentTerms,
     PriceTier,
     build_payment_plan,
     QuoteItem,
@@ -1107,6 +1123,24 @@ def quote_convert_to_orders(request: HttpRequest, quote_id: int) -> HttpResponse
             else:
                 selected_price_tier = PriceTier.RETAIL
 
+            # Condição fechada (à vista / a prazo). Só é uma escolha real quando
+            # existe preço à vista digitado e a venda fechou no varejo; fora
+            # disso o orçamento tem um preço só e a condição é a prazo.
+            selected_payment_terms = request.POST.get(
+                "selected_payment_terms",
+                PaymentTerms.INSTALLMENT,
+            )
+            cash_available = (
+                selected_price_tier == PriceTier.RETAIL
+                and quote.calculate_rounded_total_cash() is not None
+            )
+            if not cash_available:
+                selected_payment_terms = PaymentTerms.INSTALLMENT
+            elif selected_payment_terms not in PaymentTerms.values:
+                raise ValidationError(
+                    "Escolha se a venda foi fechada à vista ou a prazo."
+                )
+
             # Compatibilidade: se o formulário não enviar seleção explícita,
             # mantém comportamento antigo (todos os itens do orçamento).
             has_item_selection = request.POST.get("has_item_selection") == "1"
@@ -1184,7 +1218,10 @@ def quote_convert_to_orders(request: HttpRequest, quote_id: int) -> HttpResponse
             quote.status = QuoteStatus.CONVERTED
             quote.sale_date = timezone.localdate()
             quote.selected_price_tier = selected_price_tier
-            quote.save(update_fields=["status", "sale_date", "selected_price_tier"])
+            quote.selected_payment_terms = selected_payment_terms
+            quote.save(update_fields=[
+                "status", "sale_date", "selected_price_tier", "selected_payment_terms",
+            ])
 
             # Congela a comissão apurada pelo motor de margem. É a única forma de
             # o relatório mostrar exatamente o mesmo número que o vendedor viu no
@@ -1477,6 +1514,17 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
     ENV_H    = 32
     IMG_SZ   = 128
     PAYMENT_PLANS = quote.get_payment_plans()
+    CASH_TOTAL = None if options_mode else quote.calculate_rounded_total_cash()
+    # Observações do orçamento impressas ao cliente. As linhas são quebradas
+    # UMA vez: a mesma lista dimensiona o FOOTER_H e é redesenhada no rodapé —
+    # se os dois cálculos divergirem, o rodapé cobre o último item.
+    NOTES_LINES = []
+    if not options_mode and (quote.notes or "").strip():
+        for raw_line in quote.notes.strip().splitlines():
+            raw_line = raw_line.strip()
+            if not raw_line:
+                continue
+            NOTES_LINES.extend(_wrap(raw_line, FONT_REG, 8.5, CW))
     if options_mode:
         FOOTER_H = 160
     else:
@@ -1487,6 +1535,10 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
             FOOTER_H += 55 if quote.dual_pricing else 25
         if any(plan["down_payment"] > 0 for plan in PAYMENT_PLANS):
             FOOTER_H += 35
+        if CASH_TOTAL is not None:
+            FOOTER_H += 45
+        if NOTES_LINES:
+            FOOTER_H += 22 + 12 * len(NOTES_LINES)
 
     items = list(
         quote.items.prefetch_related('images').order_by('position', 'id')
@@ -1799,12 +1851,31 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
         total_lbl = "Valor do investimento com desconto" if disc_pct > 0 else "Valor do investimento"
         if quote.dual_pricing:
             total_lbl = "Valor do investimento — Varejo"
+        if CASH_TOTAL is not None:
+            # Com as duas condições na proposta, a barra cheia é a prazo — só
+            # o par "a prazo / à vista" faz o cliente ler a diferença.
+            total_lbl = f"{total_lbl} — A prazo"
         c.setFillColor(WHITE)
         c.setFont(FONT_REG, 9.5)
         c.drawString(MX + 16, bar_y + bar_h / 2 - 3, total_lbl)
         c.setFillColor(WHITE)
         c.setFont(FONT_BOLD, 17)
         c.drawRightString(MX + CW - 16, bar_y + bar_h / 2 - 6, _fmt_brl(avista))
+
+        # ── Total à vista (segundo preço digitado) ───────────────────────
+        if CASH_TOTAL is not None:
+            ty = bar_y - 10
+            cash_h = 34
+            cash_y = ty - cash_h
+            c.setStrokeColor(NAVY)
+            c.setLineWidth(1)
+            c.roundRect(MX, cash_y, CW, cash_h, 6, fill=0, stroke=1)
+            c.setFillColor(NAVY)
+            c.setFont(FONT_REG, 9.5)
+            c.drawString(MX + 16, cash_y + cash_h / 2 - 3, "Valor do investimento — À vista")
+            c.setFont(FONT_BOLD, 15)
+            c.drawRightString(MX + CW - 16, cash_y + cash_h / 2 - 5, _fmt_brl(CASH_TOTAL))
+            bar_y = cash_y
 
         # ── Total de atacado (orçamento atacado + varejo) ────────────────
         if quote.dual_pricing:
@@ -1824,6 +1895,20 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
             )
             c.setFont(FONT_BOLD, 15)
             c.drawRightString(MX + CW - 16, atac_y + atac_h / 2 - 5, _fmt_brl(avista_atacado))
+            bar_y = atac_y
+
+        # ── Observações ──────────────────────────────────────────────────
+        # Fecham o rodapé: vêm depois de todas as barras de valor, para nenhuma
+        # linha de texto se meter entre dois preços.
+        if NOTES_LINES:
+            ty = bar_y - 20
+            c.setFillColor(GRAY)
+            _draw_spaced("OBSERVAÇÕES", MX, ty, FONT_BOLD, 7.5, cs=1.5)
+            ty -= 14
+            for wline in NOTES_LINES:
+                c.setFillColor(GRAY)
+                _draw_spaced(wline, MX, ty, FONT_REG, 8.5, cs=0.5)
+                ty -= 12
 
     _items_page_bg()
     cur_y = _draw_header()
@@ -3116,7 +3201,12 @@ def quote_simulate_commission(request: HttpRequest, quote_id: int) -> HttpRespon
         # sem ele aqui o simulador mostrava o total calculado pelos produtos e
         # divergia do detalhe, do PDF e da comissão. Vale só para o varejo.
         total_override=(
-            quote.effective_total_override
+            (
+                quote.effective_cash_override
+                if quote.selected_payment_terms == PaymentTerms.CASH
+                and quote.effective_cash_override is not None
+                else quote.effective_total_override
+            )
             if pricing_tier == PriceTier.RETAIL
             else None
         ),
@@ -3339,6 +3429,7 @@ def quote_duplicate(request, quote_id):
             payment_fee_percent_2=original.payment_fee_percent_2,
             payment_split_amount=original.payment_split_amount,
             total_override=original.total_override,
+            total_cash_override=original.total_cash_override,
             total_rounding_mode=original.total_rounding_mode,
             total_manual_adjustment=original.total_manual_adjustment,
             dual_pricing=original.dual_pricing,

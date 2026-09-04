@@ -451,9 +451,15 @@
               </div>
             {% endif %}
             <div class="r-line" style="border-top:2px solid var(--border);margin-top:.3rem;padding-top:.6rem;">
-              <span class="r-l" style="font-weight:800;color:var(--brand);">Total ao cliente</span>
+              <span class="r-l" style="font-weight:800;color:var(--brand);">Total ao cliente{% if value_breakdown.cash_total %}{% if value_breakdown.sold_cash %} — à vista{% else %} — a prazo{% endif %}{% endif %}</span>
               <span style="font-weight:800;font-size:1.05rem;color:var(--brand);">R$ {{ value_breakdown.rounded_total|floatformat:2 }}</span>
             </div>
+            {% if value_breakdown.cash_total %}
+              <div class="r-line">
+                <span class="r-l">{% if value_breakdown.sold_cash %}A prazo{% else %}À vista{% endif %}</span>
+                <span style="font-weight:700;">R$ {% if value_breakdown.sold_cash %}{{ value_breakdown.installment_total|floatformat:2 }}{% else %}{{ value_breakdown.cash_total|floatformat:2 }}{% endif %}</span>
+              </div>
+            {% endif %}
             {% if value_breakdown.payment_fee_pct > 0 %}
               <div class="r-line" style="margin-top:.3rem;">
                 <span class="r-l" style="font-size:.8rem;color:var(--muted);">Taxa de pagamento ({{ value_breakdown.payment_fee_pct|floatformat:2 }}%) — custo da loja, não cobrado do cliente</span>
@@ -820,6 +826,36 @@
                         </div>
                       {% else %}
                         <input type="hidden" name="selected_price_tier" value="RETAIL">
+                      {% endif %}
+
+                      {% if value_breakdown.cash_total %}
+                        <div style="margin-top:1rem;border:1px solid #d5d9df;border-radius:9px;padding:.75rem;">
+                          <div style="font-size:.82rem;font-weight:800;color:var(--brand);margin-bottom:.55rem;">
+                            Condição fechada com o cliente
+                          </div>
+                          <div style="display:grid;gap:.45rem;">
+                            <label style="display:flex;align-items:center;gap:.55rem;padding:.55rem .65rem;border:1px solid #dee2e6;border-radius:7px;cursor:pointer;background:#fff;">
+                              <input type="radio" name="selected_payment_terms" value="PRAZO" required
+                                     {% if value_breakdown.selected_payment_terms != "AVISTA" %}checked{% endif %}
+                                     style="accent-color:var(--brand);">
+                              <span style="flex:1;display:flex;justify-content:space-between;gap:.5rem;">
+                                <strong>A prazo</strong>
+                                <strong>R$ {{ value_breakdown.installment_total|floatformat:2 }}</strong>
+                              </span>
+                            </label>
+                            <label style="display:flex;align-items:center;gap:.55rem;padding:.55rem .65rem;border:1px solid #dee2e6;border-radius:7px;cursor:pointer;background:#fff;">
+                              <input type="radio" name="selected_payment_terms" value="AVISTA" required
+                                     {% if value_breakdown.selected_payment_terms == "AVISTA" %}checked{% endif %}
+                                     style="accent-color:var(--brand);">
+                              <span style="flex:1;display:flex;justify-content:space-between;gap:.5rem;">
+                                <strong>À vista</strong>
+                                <strong>R$ {{ value_breakdown.cash_total|floatformat:2 }}</strong>
+                              </span>
+                            </label>
+                          </div>
+                        </div>
+                      {% else %}
+                        <input type="hidden" name="selected_payment_terms" value="PRAZO">
                       {% endif %}
 
                       <!-- Seleção de itens para pedido de compra -->
