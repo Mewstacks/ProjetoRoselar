@@ -450,6 +450,20 @@ class Quote(models.Model):
         max_digits=12, decimal_places=2, null=True, blank=True,
         verbose_name="Comissão (R$)",
     )
+    commission_gross_value = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True,
+        verbose_name="Comissão Bruta (R$)",
+        help_text="Comissão antes do abatimento de frete do vendedor.",
+    )
+    freight_commission_deduction = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal("0.00"),
+        verbose_name="Frete descontado da comissão (R$)",
+        help_text="Valor de frete assumido pelo vendedor e abatido da comissão.",
+    )
+    commission_rule = models.CharField(
+        max_length=12, default="FIXED_3", editable=False,
+        verbose_name="Regra de comissão",
+    )
     commission_calculated_at = models.DateTimeField(
         null=True, blank=True, verbose_name="Comissão apurada em",
     )

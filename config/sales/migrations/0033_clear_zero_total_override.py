@@ -33,7 +33,9 @@ def clear_zero_override(apps, schema_editor):
 
     Quote.objects.filter(pk__in=afetados).update(total_override=None)
 
-    for quote in Quote.objects.filter(pk__in=afetados).prefetch_related("items"):
+    for quote in Quote.objects.filter(pk__in=afetados).defer(
+        "commission_gross_value", "freight_commission_deduction", "commission_rule"
+    ).prefetch_related("items"):
         try:
             total = quote.calculate_total_for_tier()
         except Exception:

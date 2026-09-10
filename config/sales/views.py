@@ -371,7 +371,7 @@ def _sync_orders_from_quote(quote, original_links: dict) -> None:
         ])
 
 
-from .forms import QuoteForm, QuoteItemFormSet, OrderForm, OrderItemFormSet
+from .forms import QuoteForm, QuoteItemFormSet, OrderForm, OrderItemFormSet, parse_brl_decimal
 from .models import (
     Quote,
     QuoteStatus,
@@ -632,39 +632,6 @@ def quote_create(request: HttpRequest) -> HttpResponse:
                     if quote.freight_responsible == FreightResponsible.CUSTOMER:
                         quote.freight_value = Decimal("0.00")
 
-                    discount_percent = quote.discount_percent or Decimal("0")
-                    if discount_percent > 15:
-                        authorized_by_username = request.POST.get('discount_authorized_by')
-                        if authorized_by_username:
-                            from django.contrib.auth import get_user_model
-                            User = get_user_model()
-                            try:
-                                auth_user = User.objects.get(username=authorized_by_username, is_staff=True)
-                                quote.discount_authorized_by = auth_user
-                                quote.discount_authorized_at = timezone.now()
-                            except User.DoesNotExist:
-                                messages.error(request, "Usuário autorizador não encontrado.")
-                                return render(
-                                    request,
-                                    "sales/quote_form.html",
-                                    {
-                                        "form": form,
-                                        "formset": formset,
-                                        "submission_token": submission_token,
-                                    },
-                                )
-                        else:
-                            messages.error(request, "Desconto acima de 15% requer autorização.")
-                            return render(
-                                request,
-                                "sales/quote_form.html",
-                                {
-                                    "form": form,
-                                    "formset": formset,
-                                    "submission_token": submission_token,
-                                },
-                            )
-
                     quote.save()
 
                     formset.instance = quote
@@ -740,24 +707,6 @@ def quote_edit(request: HttpRequest, quote_id: int) -> HttpResponse:
                 
                 if quote_obj.freight_responsible == FreightResponsible.CUSTOMER:
                     quote_obj.freight_value = Decimal("0.00")
-                
-                discount_percent = quote_obj.discount_percent or Decimal("0")
-                if discount_percent > 15:
-                    if not quote.discount_authorized_by or quote.discount_percent != discount_percent:
-                        authorized_by_username = request.POST.get('discount_authorized_by')
-                        if authorized_by_username:
-                            from django.contrib.auth import get_user_model
-                            User = get_user_model()
-                            try:
-                                auth_user = User.objects.get(username=authorized_by_username, is_staff=True)
-                                quote_obj.discount_authorized_by = auth_user
-                                quote_obj.discount_authorized_at = timezone.now()
-                            except User.DoesNotExist:
-                                messages.error(request, "Usuário autorizador não encontrado.")
-                                return render(request, "sales/quote_form.html", {"form": form, "formset": formset, "quote": quote})
-                        else:
-                            messages.error(request, "Desconto acima de 15% requer autorização.")
-                            return render(request, "sales/quote_form.html", {"form": form, "formset": formset, "quote": quote})
                 
                 # Captura os vínculos pedido→item ANTES de salvar (SET_NULL zera
                 # a origem ao apagar itens); usado para sincronizar os pedidos.
@@ -1826,9 +1775,17 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
                 else:
                     action = "Parcelado" if leg["installments"] > 1 else "À vista"
 
+                # Varejo e atacado são modalidades de preço, não formas de
+                # pagamento. No PDF do cliente, não misturamos as duas coisas
+                # no mesmo rótulo (ex.: "Varejo — À vista no PIX"), pois isso
+                # fazia parecer que a proposta oferecia somente PIX. A
+                # condição (à vista/parcelado, entrada/restante) continua
+                # transparente, sem transformar PIX no nome da modalidade.
                 method_suffix = (
                     f" no {leg['method_label']}"
-                    if leg["method_label"] and action != leg["method_label"]
+                    if not quote.dual_pricing
+                    and leg["method_label"]
+                    and action != leg["method_label"]
                     else ""
                 )
                 label = f"{prefix}{action}{method_suffix}"
@@ -1988,7 +1945,9 @@ def quote_pdf_supplier(request: HttpRequest, quote_id: int) -> HttpResponse:
             continue
         raw = request.POST.get(f"price_{item.id}", "").strip()
         try:
-            supplier_prices[item.id] = Decimal(raw.replace(",", "."))
+            # Aceita tanto o valor normalizado pelo navegador ("1234.56") quanto
+            # uma submissão manual no padrão brasileiro ("1.234,56" ou "2.300").
+            supplier_prices[item.id] = parse_brl_decimal(raw, "preço de compra")
         except Exception:
             messages.error(
                 request,
@@ -2823,7 +2782,9 @@ def order_pdf(request: HttpRequest, order_id: int) -> HttpResponse:
     for item in items_qs_pre:
         raw = request.POST.get(f"price_{item.id}", "").strip()
         try:
-            manual_prices[item.id] = Decimal(raw.replace(",", "."))
+            # parse_brl_decimal cobre "1.234,56" e "2.300"; o replace anterior
+            # transformava o primeiro em erro e o segundo em R$ 2,30.
+            manual_prices[item.id] = parse_brl_decimal(raw, "preço de compra")
         except Exception:
             messages.error(
                 request,
@@ -3159,6 +3120,15 @@ def quote_simulate_commission(request: HttpRequest, quote_id: int) -> HttpRespon
                 down_payment_value = None
         except Exception:
             down_payment_value = None
+        def _optional_decimal(name):
+            raw = (request.POST.get(name, '') or '').strip().replace(',', '.')
+            try:
+                return Decimal(raw) if raw else None
+            except Exception:
+                return None
+        freight_commission_deduction = _optional_decimal('freight_commission_deduction') or Decimal('0')
+        manual_fee_percent = _optional_decimal('manual_fee_percent')
+        manual_fee_percent_2 = _optional_decimal('manual_fee_percent_2')
     else:
         sim_payment_type    = quote.payment_type or ''
         sim_has_architect   = quote.has_architect
@@ -3175,6 +3145,9 @@ def quote_simulate_commission(request: HttpRequest, quote_id: int) -> HttpRespon
         sim_split_amount    = quote.payment_split_amount
         price_increase_pct_2 = Decimal('0')
         down_payment_value  = quote.down_payment_value or None
+        freight_commission_deduction = quote.freight_commission_deduction or Decimal('0')
+        manual_fee_percent = quote.payment_fee_percent
+        manual_fee_percent_2 = quote.payment_fee_percent_2
 
     from core.models import Architect
     selected_architect = None
@@ -3197,6 +3170,9 @@ def quote_simulate_commission(request: HttpRequest, quote_id: int) -> HttpRespon
         sim_split_amount=sim_split_amount,
         price_increase_pct_2=price_increase_pct_2,
         down_payment_value=down_payment_value,
+        freight_commission_deduction=freight_commission_deduction,
+        manual_fee_percent=manual_fee_percent,
+        manual_fee_percent_2=manual_fee_percent_2,
         # "Preço Final ao Cliente" digitado no orçamento é o valor real da venda;
         # sem ele aqui o simulador mostrava o total calculado pelos produtos e
         # divergia do detalhe, do PDF e da comissão. Vale só para o varejo.
@@ -3219,6 +3195,15 @@ def quote_simulate_commission(request: HttpRequest, quote_id: int) -> HttpRespon
     quote_actions_unlocked = bool(request.session.get(save_session_key, False))
 
     if request.method == "POST" and request.POST.get('action') == 'save_conditions':
+        if ctx['manual_fee_required_1'] or ctx['manual_fee_required_2']:
+            messages.error(request, "Informe a taxa do cartão para a parcela escolhida antes de salvar.")
+            ctx['quote'] = quote
+            ctx['quote_actions_unlocked'] = quote_actions_unlocked
+            ctx['selected_architect'] = selected_architect
+            ctx['sim_architect_id'] = sim_architect_id
+            ctx['can_view_commission'] = _can_view_commission(request.user)
+            ctx['is_admin'] = _is_admin(request.user)
+            return render(request, 'sales/quote_simulation.html', ctx)
         if ctx['margin_limit_exceeded']:
             messages.error(request, "Condições bloqueadas. Ajuste o preço antes de salvar.")
             ctx['quote'] = quote
@@ -3240,6 +3225,7 @@ def quote_simulate_commission(request: HttpRequest, quote_id: int) -> HttpRespon
             quote.payment_type           = ctx['sim_payment_type']
             quote.payment_installments   = ctx['sim_installments']
             quote.payment_fee_percent    = ctx['payment_fee_percent']
+            quote.freight_commission_deduction = ctx['freight_commission_deduction']
             if ctx['split_mode']:
                 quote.payment_type_2         = ctx['sim_payment_type_2']
                 quote.payment_installments_2 = ctx['sim_installments_2']
@@ -3414,6 +3400,7 @@ def quote_duplicate(request, quote_id):
             status=QuoteStatus.DRAFT,
             quote_date=timezone.localdate(),
             freight_value=original.freight_value,
+            freight_commission_deduction=original.freight_commission_deduction,
             freight_responsible=original.freight_responsible,
             shipping_company=original.shipping_company,
             shipping_payment_method=original.shipping_payment_method,

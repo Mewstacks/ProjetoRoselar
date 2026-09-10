@@ -164,6 +164,10 @@ def _run_simulation(
         comissao_final = max(Decimal('2'), min(mld_pct, Decimal('4')))
 
     comissao_final = comissao_final.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    # Regra comercial atual: comissão fixa, sem escalonamento por margem,
+    # forma de pagamento, entrada ou quantidade de parcelas.
+    comissao_final = Decimal('3.00')
+    sacrificio_ativo = False
 
     if mld_pct < Decimal('0'):
         status_simulacao = "VERMELHO"
@@ -175,7 +179,7 @@ def _run_simulation(
 
     return {
         "status": status_simulacao,
-        "controls_blocked": status_simulacao == "VERMELHO",
+        "controls_blocked": False,
         "totals": {
             "subtotal":              subtotal,
             "adj_subtotal":          valor_produtos_ajustado,
@@ -216,6 +220,9 @@ def _build_simulation_context(
     price_increase_pct_2: Decimal = Decimal("0"),
     down_payment_value: Decimal | None = None,
     total_override: Decimal | None = None,
+    freight_commission_deduction: Decimal | None = None,
+    manual_fee_percent: Decimal | None = None,
+    manual_fee_percent_2: Decimal | None = None,
 ) -> dict:
     """Wrapper que organiza os inputs do request e injeta no Motor de Margem.
 
@@ -230,15 +237,18 @@ def _build_simulation_context(
         payment_description,
     )
 
-    MAX_DISCOUNT_ABSOLUTE = Decimal("30")
+    MAX_DISCOUNT_ABSOLUTE = Decimal("100")
     MAX_PRICE_INCREASE    = Decimal("30")
     MARGIN_BASE      = Decimal("12")
-    COMMISSION_FLOOR = Decimal("2")
+    COMMISSION_FLOOR = Decimal("3")
     ARQUITETO_PCT    = Decimal("5")  # 5% sobre valor ajustado líquido da margem de 12%
 
     # Higienização de Inputs
     subtotal      = max(Decimal("0"), Decimal(str(subtotal or 0)))
     freight_value = max(Decimal("0"), Decimal(str(freight_value or 0)))
+    freight_commission_deduction = max(
+        Decimal("0"), Decimal(str(freight_commission_deduction or 0))
+    )
     sim_discount         = max(Decimal("0"), min(Decimal(str(sim_discount or 0)), MAX_DISCOUNT_ABSOLUTE))
     price_increase_pct   = max(Decimal("0"), min(Decimal(str(price_increase_pct or 0)), MAX_PRICE_INCREASE))
     price_increase_pct_2 = max(Decimal("0"), min(Decimal(str(price_increase_pct_2 or 0)), MAX_PRICE_INCREASE))
@@ -253,21 +263,30 @@ def _build_simulation_context(
     # Tarifa ausente (None) = parcelamento não cadastrado. Bloqueia em vez de
     # assumir 0%, que liberaria a venda sem cobrar o custo do banco.
     tariff_missing = False
+    missing_fee_1 = False
+    missing_fee_2 = False
 
-    def _fee_for(payment_type: str, installments: int) -> Decimal:
-        nonlocal tariff_missing
+    def _fee_for(payment_type: str, installments: int, manual_fee: Decimal | None, leg: int) -> Decimal:
+        nonlocal tariff_missing, missing_fee_1, missing_fee_2
         fee = PaymentTariff.get_fee(payment_type, installments)
         if fee is None:
+            if manual_fee is not None:
+                return max(Decimal("0"), Decimal(str(manual_fee)))
             tariff_missing = True
+            if payment_type == 'CREDIT_CARD':
+                if leg == 1:
+                    missing_fee_1 = True
+                else:
+                    missing_fee_2 = True
             return Decimal("0")
         return Decimal(str(fee))
 
     fee_1 = Decimal("0")
     fee_2 = Decimal("0")
     if sim_payment_type:
-        fee_1 = _fee_for(sim_payment_type, sim_installments)
+        fee_1 = _fee_for(sim_payment_type, sim_installments, manual_fee_percent, 1)
     if split_mode and sim_payment_type_2:
-        fee_2 = _fee_for(sim_payment_type_2, sim_installments_2)
+        fee_2 = _fee_for(sim_payment_type_2, sim_installments_2, manual_fee_percent_2, 2)
 
     # ---- Markup por dentro no Frete ANTES de dividir o valor entre pernas ----
     # Usa a maior taxa para garantir que a pior perna ainda cobre o frete exato.
@@ -442,21 +461,25 @@ def _build_simulation_context(
         max_inst = max_inst_map.get(pt_val, 1)
         tariff_lookup = PaymentTariff.lookup_type(pt_val)
         # Só oferece parcelas com tarifa cadastrada — ausência não é 0%.
-        options = [
-            {
-                'installments': t.installments,
-                'fee': float(t.fee_percent),
-                'label': payment_condition_label(pt_val, t.installments),
-            }
+        configured = {
+            t.installments: t.fee_percent
             for t in PaymentTariff.objects.filter(
                 payment_type=tariff_lookup, installments__lte=max_inst
-            ).order_by('installments')
+            )
+        }
+        options = [
+            {
+                'installments': installment,
+                'fee': float(configured[installment]) if installment in configured else None,
+                'label': payment_condition_label(pt_val, installment),
+            }
+            for installment in range(1, max_inst + 1)
         ]
         tariffs_by_type[pt_val] = options
 
     # ---- Status e flags do template ----
     status = resultado['status']
-    controls_blocked = resultado['controls_blocked'] or tariff_missing
+    controls_blocked = False
 
     _AVISTA_TYPES = {'PIX', 'CASH', 'DEBIT_CARD', 'CHEQUE', 'BOLETO', 'BOLETO_30'}
     split_m1_avista  = split_mode and sim_payment_type   in _AVISTA_TYPES
@@ -465,6 +488,10 @@ def _build_simulation_context(
 
     seller_commission_percent = resultado['seller']['commission_pct']
     seller_commission_value   = resultado['seller']['commission_value']
+    seller_commission_gross = seller_commission_value.quantize(Decimal("0.01"))
+    seller_commission_value = max(
+        Decimal("0"), seller_commission_gross - freight_commission_deduction
+    ).quantize(Decimal("0.01"))
     sacrifice_active          = resultado['seller']['sacrifice_active']
 
     # Teto real de comissão depende do método principal da venda.
@@ -478,6 +505,8 @@ def _build_simulation_context(
         commission_max_actual = Decimal('3')
     else:
         commission_max_actual = Decimal('4')
+
+    commission_max_actual = Decimal('3')
 
     # ---- Sugestões de acréscimo ----
     # Restaura o que a "reforma testuaria" (6b8c4a2) tinha fixado em zero: o
@@ -589,6 +618,7 @@ def _build_simulation_context(
         'split_m2_avista':          split_m2_avista,
         'split_both_cards':         split_both_cards,
         'down_payment_value':       down_payment_used,
+        'freight_commission_deduction': freight_commission_deduction,
         'dp_min_value':             dp_min_value,
         'dp_to_unlock':             dp_to_unlock,
 
@@ -608,6 +638,10 @@ def _build_simulation_context(
         # Custos / taxas
         'payment_fee_percent':       fee_1,
         'payment_fee_percent_2':     fee_2,
+        'manual_fee_required_1':      missing_fee_1,
+        'manual_fee_required_2':      missing_fee_2,
+        'manual_fee_percent':         manual_fee_percent,
+        'manual_fee_percent_2':       manual_fee_percent_2,
         'payment_fee_value':         payment_fee_value,
         'payment_fee_value_2':       payment_fee_value_2,
         'blended_fee_pct':           blended_fee_pct,
@@ -624,6 +658,7 @@ def _build_simulation_context(
 
         # Vendedor / Arquiteto
         'seller_commission_percent':   seller_commission_percent,
+        'seller_commission_gross_value': seller_commission_gross,
         'seller_commission_value':     seller_commission_value,
         'original_commission_percent': commission_max_actual,
         'commission_floor':            COMMISSION_FLOOR,
@@ -676,6 +711,9 @@ def _build_simulation_context(
 COMMISSION_FIELDS = (
     "commission_pct",
     "commission_value",
+    "commission_gross_value",
+    "freight_commission_deduction",
+    "commission_rule",
     "commission_calculated_at",
     "commission_source",
 )
@@ -724,6 +762,9 @@ def simulate_quote(quote) -> dict:
         sim_split_amount=quote.payment_split_amount,
         price_increase_pct_2=Decimal("0"),
         down_payment_value=quote.down_payment_value or None,
+        freight_commission_deduction=quote.__dict__.get("freight_commission_deduction", Decimal("0")),
+        manual_fee_percent=quote.payment_fee_percent,
+        manual_fee_percent_2=quote.payment_fee_percent_2,
         # O preço final digitado se refere só ao varejo (mesma regra de
         # Quote.calculate_rounded_total_wholesale, que o ignora). Venda fechada
         # à vista: o preço à vista é o valor da venda, então é ele que vira a
@@ -748,13 +789,34 @@ def persist_quote_commission(quote, source: str = "ENGINE") -> dict:
     from django.utils import timezone
     from sales.models import Quote
 
+    # Vendas que jÃ¡ existiam quando a regra fixa entrou em vigor permanecem
+    # congeladas; editar uma condiÃ§Ã£o delas nÃ£o reescreve o histÃ³rico.
+    if quote.__dict__.get("commission_rule") == "LEGACY":
+        return {
+            "commission_pct": quote.commission_pct,
+            "commission_gross_value": quote.__dict__.get("commission_gross_value"),
+            "commission_value": quote.commission_value,
+        }
+
     ctx = simulate_quote(quote)
     values = {
         "commission_pct": Decimal(str(ctx["seller_commission_percent"])).quantize(Decimal("0.01")),
+        "commission_gross_value": Decimal(str(ctx["seller_commission_gross_value"])).quantize(Decimal("0.01")),
         "commission_value": Decimal(str(ctx["seller_commission_value"])).quantize(Decimal("0.01")),
+        "freight_commission_deduction": Decimal(str(ctx["freight_commission_deduction"])).quantize(Decimal("0.01")),
+        "commission_rule": "FIXED_3",
         "commission_calculated_at": timezone.now(),
         "commission_source": source,
     }
+    # Migrações históricas chamam esta função antes de os campos da regra fixa
+    # existirem fisicamente. Grave somente as colunas disponíveis naquele ponto.
+    from django.db import connection
+    columns = {
+        column.name for column in connection.introspection.get_table_description(
+            connection.cursor(), Quote._meta.db_table
+        )
+    }
+    values = {name: value for name, value in values.items() if name in columns}
     Quote.objects.filter(pk=quote.pk).update(**values)
     for field, value in values.items():
         setattr(quote, field, value)
@@ -772,6 +834,7 @@ def clear_quote_commission(quote) -> None:
     values = {
         "commission_pct": None,
         "commission_value": None,
+        "commission_gross_value": None,
         "commission_calculated_at": None,
         "commission_source": "",
     }

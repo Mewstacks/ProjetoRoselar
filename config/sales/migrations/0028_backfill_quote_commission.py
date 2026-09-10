@@ -32,6 +32,9 @@ def backfill_commissions(apps, schema_editor):
             "submission_token",
             "total_cash_override",
             "selected_payment_terms",
+            "commission_gross_value",
+            "freight_commission_deduction",
+            "commission_rule",
         )
         .prefetch_related("items")
     )

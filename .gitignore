@@ -58,6 +58,7 @@ wheels/
 .pytest_cache/
 htmlcov/
 .tox/
+ux-*.png
 
 # Jupyter Notebook
 .ipynb_checkpoints

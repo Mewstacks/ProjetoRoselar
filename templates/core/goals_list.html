@@ -6,18 +6,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Metas | Roselar</title>
   <link rel="shortcut icon" type="image/x-icon" href="{% static 'assets/img/favicons/favicon.ico' %}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200;300;400;500;600;700&display=swap" rel="stylesheet">
   <link href="{% static 'assets/css/theme.min.css' %}" rel="stylesheet">
   <link href="{% static 'assets/css/user.css' %}" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/flowbite@2.5.2/dist/flowbite.min.css" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <style>:root{--brand:#111418;}body{font-variant-numeric:tabular-nums;font-family:'Manrope',sans-serif;}input::placeholder,textarea::placeholder{color:#565C66;opacity:1;}.goal-bar{height:20px;background:#e9ecef;border-radius:4px;overflow:hidden;}.goal-bar .fill{height:100%;background:#198754;}@media (pointer: coarse){ .btn, .btn-sm { min-height: 44px; display: inline-flex; align-items: center; } }</style>
+  <style>:root{--brand:#111418;}body{font-variant-numeric:tabular-nums;font-family:'Manrope',sans-serif;}input::placeholder,textarea::placeholder{color:#565C66;opacity:1;}.goal-bar{height:20px;background:#e9ecef;border-radius:4px;overflow:hidden;}.goal-bar .fill{height:100%;background:#198754;}#newGoalModal.show .modal-dialog{transform:none!important;transition:none;}#newGoalModal .modal-content{display:flex;flex-direction:column;max-height:calc(100vh - 1rem);}#newGoalModal .modal-header,#newGoalModal .modal-footer{flex:0 0 auto;}#newGoalModal .modal-body{flex:1 1 0!important;height:auto!important;min-height:0;overflow-y:auto;}@media (pointer: coarse){ .btn, .btn-sm { min-height: 44px; display: inline-flex; align-items: center; } }@media (max-width:575.98px){#newGoalModal .modal-body{height:calc(100vh - 164px)!important;}#newGoalModal .modal-footer{flex-wrap:nowrap;}#newGoalModal .modal-footer .btn{flex:1 1 50%;min-width:0;justify-content:center;white-space:nowrap;}}</style>
 </head>
 <body>
-  <main class="main" id="top">
+  <a class="visually-hidden-focusable position-absolute top-0 start-0 m-2 bg-white text-dark p-2" href="#main-content">Pular para o conteúdo</a>
+  <main class="main" id="main-content" tabindex="-1">
     <nav class="navbar navbar-expand-lg fixed-top navbar-dark" data-navbar-on-scroll="data-navbar-on-scroll">
       <div class="container">
-        <a class="navbar-brand" href="{% url 'core:index' %}"><img src="{% static 'assets/img/Logo.png' %}?v=2" alt="Roselar — Início" style="height:40px;"></a>
+        <a class="navbar-brand" href="{% url 'core:index' %}"><img src="{% static 'assets/img/Logo.png' %}?v=2" alt="Roselar — Início" width="160" height="40" style="height:40px;"></a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent" aria-label="Abrir navegação" aria-controls="navbarSupportedContent" aria-expanded="false"><i class="fa-solid fa-bars text-white fs-3" aria-hidden="true"></i></button>
         <div class="collapse navbar-collapse" id="navbarSupportedContent">
           <ul class="navbar-nav ms-auto align-items-center">
             <li class="nav-item"><a class="nav-link" href="{% url 'core:dashboard' %}">Dashboard</a></li>
@@ -34,14 +38,22 @@
     <section class="py-5" style="min-height:100vh;">
       <div style="position:absolute;top:0;left:0;right:0;height:30vh;background:var(--brand);z-index:-1;"></div>
       <div class="container" style="margin-top:80px;">
-        {% if messages %}{% for message in messages %}<div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">{{ message }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{% endfor %}{% endif %}
+        {% if messages %}{% for message in messages %}<div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">{{ message }}<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fechar mensagem"></button></div>{% endfor %}{% endif %}
 
         <div class="bg-white shadow-sm p-4 mb-4" style="border-radius:8px;">
           <div class="d-flex justify-content-between align-items-center">
-            <h1 class="h4 fw-bold mb-0" style="color:var(--brand);"><i class="fa-solid fa-bullseye me-2"></i>Metas de Vendas</h1>
-            {% if is_admin %}<button class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#newGoalModal"><i class="fa-solid fa-plus me-1"></i>Nova Meta</button>{% endif %}
+            <h1 class="h4 fw-bold mb-0" style="color:var(--brand);"><i class="fa-solid fa-bullseye me-2" aria-hidden="true"></i>Metas de Vendas</h1>
+            {% if is_admin %}<button class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#newGoalModal"><i class="fa-solid fa-plus me-1" aria-hidden="true"></i>Nova Meta</button>{% endif %}
           </div>
         </div>
+
+        <section class="bg-white border p-3 p-md-4 mb-4" style="border-radius:8px;" aria-labelledby="ifood-title">
+          <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+            <div><h2 id="ifood-title" class="h5 fw-bold mb-1" style="color:var(--brand);"><i class="fa-solid fa-gift me-2 text-success" aria-hidden="true"></i>Premiação iFood Benefícios</h2><p class="small text-muted mb-0">Ciclo {{ ifood_cycle_start|date:"d/m" }} a {{ ifood_cycle_end|date:"d/m/Y" }} · maior faixa atingida no mês.</p></div>
+            <span class="badge text-bg-success">Até R$ 3.000</span>
+          </div>
+          <div class="table-responsive"><table class="table table-sm align-middle mb-0"><caption class="visually-hidden">Faturamento e maior premiação iFood atingida por vendedor no ciclo atual.</caption><thead><tr><th scope="col">Vendedor</th><th scope="col" class="text-end">Faturamento</th><th scope="col" class="text-end">Prêmio</th><th scope="col">Próxima faixa</th></tr></thead><tbody>{% for award in ifood_awards %}<tr><td class="fw-bold">{{ award.seller.get_full_name|default:award.seller.username }}</td><td class="text-end">R$ {{ award.total|floatformat:2 }}</td><td class="text-end fw-bold {% if award.prize %}text-success{% else %}text-muted{% endif %}">{% if award.prize %}R$ {{ award.prize|floatformat:2 }}{% else %}Ainda não atingida{% endif %}</td><td>{% if award.next_target %}R$ {{ award.next_target|floatformat:0 }}{% else %}<span class="text-success fw-bold">Faixa máxima atingida</span>{% endif %}</td></tr>{% empty %}<tr><td colspan="4" class="text-center text-muted py-3">Nenhum vendedor elegível.</td></tr>{% endfor %}</tbody></table></div>
+        </section>
 
         <div class="row g-3">
           {% for goal in goals %}
@@ -70,25 +82,25 @@
 
     {% if is_admin %}
     <div class="modal fade" id="newGoalModal" tabindex="-1">
-      <div class="modal-dialog">
+      <div class="modal-dialog modal-dialog-scrollable">
         <div class="modal-content">
-          <form method="post" action="{% url 'core:goal_create' %}">
+          <form method="post" action="{% url 'core:goal_create' %}" autocomplete="off">
             {% csrf_token %}
             <div class="modal-header" style="background:var(--brand);color:#fff;">
-              <h5 class="modal-title"><i class="fa-solid fa-bullseye me-2"></i>Nova Meta</h5>
-              <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+              <h5 class="modal-title"><i class="fa-solid fa-bullseye me-2" aria-hidden="true"></i>Nova Meta</h5>
+              <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Fechar"></button>
             </div>
             <div class="modal-body">
               <div class="mb-3">
-                <label class="form-label fw-bold">Tipo</label>
+                <label class="form-label fw-bold" for="goalTypeSelect">Tipo</label>
                 <select name="goal_type" class="form-control" id="goalTypeSelect" onchange="toggleSellerField()">
                   <option value="INDIVIDUAL">Individual</option>
                   <option value="COLLECTIVE">Coletiva</option>
                 </select>
               </div>
               <div class="mb-3" id="sellerField">
-                <label class="form-label fw-bold">Vendedor</label>
-                <select name="seller_id" class="form-control">
+                <label class="form-label fw-bold" for="goalSellerSelect">Vendedor</label>
+                <select name="seller_id" class="form-control" id="goalSellerSelect">
                   <option value="">Selecione...</option>
                   {% for seller in sellers %}
                   <option value="{{ seller.id }}">{{ seller.username }}</option>
@@ -97,18 +109,18 @@
                 <small class="text-muted">Obrigatório para meta individual.</small>
               </div>
               <div class="row">
-                <div class="col-md-6 mb-3"><label class="form-label fw-bold">Período</label><select name="period" class="form-control"><option value="MONTHLY">Mensal</option><option value="QUARTERLY">Trimestral</option><option value="YEARLY">Anual</option></select></div>
-                <div class="col-md-6 mb-3"><label class="form-label fw-bold">Valor Alvo (R$)</label><input type="number" name="target_value" class="form-control" step="0.01" required></div>
+                <div class="col-md-6 mb-3"><label class="form-label fw-bold" for="goalPeriodSelect">Período</label><select name="period" class="form-control" id="goalPeriodSelect"><option value="MONTHLY">Mensal</option><option value="QUARTERLY">Trimestral</option><option value="YEARLY">Anual</option></select></div>
+                <div class="col-md-6 mb-3"><label class="form-label fw-bold" for="goalTargetValue">Valor Alvo (R$)</label><input type="text" name="target_value" class="form-control" id="goalTargetValue" inputmode="numeric" data-financial="money" placeholder="0,00" required></div>
               </div>
               <div class="row">
-                <div class="col-md-6 mb-3"><label class="form-label fw-bold">Início</label><input type="date" name="period_start" class="form-control" required></div>
-                <div class="col-md-6 mb-3"><label class="form-label fw-bold">Fim</label><input type="date" name="period_end" class="form-control" required></div>
+                <div class="col-md-6 mb-3"><label class="form-label fw-bold" for="goalPeriodStart">Início</label><input type="date" name="period_start" class="form-control" id="goalPeriodStart" required></div>
+                <div class="col-md-6 mb-3"><label class="form-label fw-bold" for="goalPeriodEnd">Fim</label><input type="date" name="period_end" class="form-control" id="goalPeriodEnd" required></div>
               </div>
-              <div class="mb-3"><label class="form-label fw-bold">Qtd Alvo (opcional)</label><input type="number" name="target_quantity" class="form-control" value="0"></div>
+              <div class="mb-3"><label class="form-label fw-bold" for="goalTargetQuantity">Qtd Alvo (opcional)</label><input type="number" name="target_quantity" class="form-control" id="goalTargetQuantity" value="0"></div>
             </div>
             <div class="modal-footer">
               <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-              <button type="submit" class="btn btn-success"><i class="fa-solid fa-save me-1"></i>Criar Meta</button>
+              <button type="submit" class="btn btn-success"><i class="fa-solid fa-save me-1" aria-hidden="true"></i>Criar Meta</button>
             </div>
           </form>
         </div>
@@ -121,6 +133,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.11.8/dist/umd/popper.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.min.js"></script>
   <script src="{% static 'assets/js/theme.js' %}"></script>
+  <script src="{% static 'assets/js/financial-inputs.js' %}"></script>
   <script src="https://cdn.jsdelivr.net/npm/flowbite@2.5.2/dist/flowbite.min.js"></script>
   <script>
     function toggleSellerField() {

@@ -1,3 +1,4 @@
+{% load l10n %}
 {% comment %}
    Shared simulation panel — included by both:
      • quote_simulation.html  (standalone is falsy / absent)
@@ -56,8 +57,8 @@
                     <span class="s-max" id="lbl-max-discount">{{ max_discount_allowed|floatformat:0 }}%</span>
                   </div>
                   <input type="range" class="sl-disc" id="discount-slider"
-                         min="0" max="{{ max_discount_allowed|floatformat:1 }}" step="0.1"
-                         value="{{ discount_percent }}"
+                         min="0" max="{{ max_discount_allowed|unlocalize }}" step="0.1"
+                         value="{{ discount_percent|unlocalize }}"
                          oninput="onDiscountChange(this.value); scheduleSubmit()"
                          {% if quote.dual_pricing and pricing_tier == 'WHOLESALE' %}disabled{% endif %}>
                 </div>
@@ -117,7 +118,7 @@
                       </div>
                       <input type="range" class="sl-inc" id="increase-slider"
                              min="0" max="30" step="0.1"
-                             value="{{ price_increase_pct }}"
+                             value="{{ price_increase_pct|unlocalize }}"
                              oninput="onIncreaseChange(this.value); scheduleSubmit()">
                     </div>
                     {% if split_mode and margin_exceeded_1 %}
@@ -150,7 +151,7 @@
                       </div>
                       <input type="range" class="sl-inc" id="increase2-slider"
                              min="0" max="30" step="0.1"
-                             value="{{ price_increase_pct_2 }}"
+                             value="{{ price_increase_pct_2|unlocalize }}"
                              oninput="onIncrease2Change(this.value); scheduleSubmit()">
                     </div>
                     {% if split_mode and margin_exceeded_2 %}
@@ -234,7 +235,7 @@
 
                 <!-- ─── Método 1 — ganha borda colorida no split mode ─── -->
                 <div id="method1-wrap"
-                     style="{% if split_mode %}border:1.5px solid var(--brand);border-radius:10px;padding:.75rem .9rem;margin-bottom:0;{% endif %}transition:all .2s;">
+                     style="{% if split_mode %}border:1.5px solid var(--brand);border-radius:10px;padding:.75rem .9rem;margin-bottom:0;{% endif %}transition:border-color .2s,box-shadow .2s;">
 
                   <!-- Badge visível só no split mode -->
                   <div id="method1-hdr"
@@ -266,6 +267,14 @@
                     </div>
                   </div>
 
+                  <div id="manual-fee-row" class="mt-2" style="display:{% if manual_fee_required_1 %}block{% else %}none{% endif %};">
+                    <label for="manual-fee-input" class="f-label mb-1">Taxa não cadastrada para esta condição (%)</label>
+                    <input id="manual-fee-input" name="manual_fee_input" class="f-select" type="text"
+                           inputmode="decimal" data-financial="percent" value="{% if manual_fee_percent is not None %}{{ manual_fee_percent|floatformat:2 }}{% endif %}"
+                           aria-describedby="manual-fee-help" oninput="scheduleSubmit()">
+                    <div id="manual-fee-help" class="small text-muted mt-1">Informe a taxa do cartão para gravá-la nesta venda.</div>
+                  </div>
+
                   <!-- Toggle Entrada — abaixo dos seletores -->
                   <label class="sw mt-3" for="chk-split">
                     <input type="checkbox" id="chk-split" value="1"
@@ -288,7 +297,7 @@
                           <input type="text" id="split-amount-input"
                                  placeholder="0,00"
                                  value="{% if split_mode and sim_split_amount %}{{ sim_split_amount|floatformat:2 }}{% endif %}"
-                                 style="border:none;outline:none;padding:.42rem .6rem;font-weight:700;font-size:.95rem;width:100%;color:var(--fg);background:transparent;"
+                                 style="border:none;outline:auto;padding:.42rem .6rem;font-weight:700;font-size:.95rem;width:100%;color:var(--fg);background:transparent;"
                                  inputmode="decimal" oninput="maskCurrency(this); onSplitAmountChange(this.value)">
                         </div>
                       </div>
@@ -299,6 +308,13 @@
                         </div>
                       </div>
                     </div>
+                  </div>
+                  <div id="manual-fee2-row" class="mt-2" style="display:{% if manual_fee_required_2 %}block{% else %}none{% endif %};">
+                    <label for="manual-fee2-input" class="f-label mb-1">Taxa não cadastrada para esta condição (%)</label>
+                    <input id="manual-fee2-input" name="manual_fee2_input" class="f-select" type="text"
+                           inputmode="decimal" data-financial="percent" value="{% if manual_fee_percent_2 is not None %}{{ manual_fee_percent_2|floatformat:2 }}{% endif %}"
+                           aria-describedby="manual-fee2-help" oninput="scheduleSubmit()">
+                    <div id="manual-fee2-help" class="small text-muted mt-1">Informe a taxa do cartão para gravá-la nesta venda.</div>
                   </div>
                 </div>
 
@@ -349,6 +365,19 @@
 
               </div>
             </div>
+
+            {% if not standalone %}
+            <div class="s-card fi fi-2">
+              <div class="s-hdr"><div class="s-icon muted"><i class="fa-solid fa-truck"></i></div>Frete por conta do vendedor</div>
+              <div class="s-body">
+                <label for="freight-commission-input" class="f-label">Valor a descontar da comissão (R$)</label>
+                <input id="freight-commission-input" name="freight_commission_input" class="f-select" type="text" inputmode="numeric" data-financial="money"
+                       value="{{ freight_commission_deduction|floatformat:2 }}" oninput="scheduleSubmit()"
+                       aria-describedby="freight-commission-help">
+                <div id="freight-commission-help" class="small text-muted mt-1">Este valor não altera o frete cobrado do cliente; ele reduz somente a comissão líquida.</div>
+              </div>
+            </div>
+            {% endif %}
 
             <!-- Entrada do Cliente -->
             <div class="s-card fi" id="dp-calc-card" style="display:none;">
@@ -448,17 +477,17 @@
 
             <div id="sim-results">
             <span id="sim-data"
-                  data-max-discount="{{ max_discount_allowed|floatformat:1 }}"
+                  data-max-discount="{{ max_discount_allowed|unlocalize }}"
                   data-controls-blocked="{{ controls_blocked|yesno:'1,0' }}"
-                  data-discount-clamped="{{ discount_percent|floatformat:1 }}"
-                  data-price-increase="{{ price_increase_pct|floatformat:1 }}"
-                  data-price-increase-2="{{ price_increase_pct_2|floatformat:1 }}"
+                  data-discount-clamped="{{ discount_percent|unlocalize }}"
+                  data-price-increase="{{ price_increase_pct|unlocalize }}"
+                  data-price-increase2="{{ price_increase_pct_2|unlocalize }}"
                   data-target-mode="{{ target_mode|yesno:'1,0' }}"
                   data-margin-exceeded="{{ margin_exceeded|yesno:'1,0' }}"
                   data-margin-limit-exceeded="{{ margin_limit_exceeded|yesno:'1,0' }}"
                   data-split-both-cards="{{ split_both_cards|yesno:'1,0' }}"
                   data-split-m1-avista="{{ split_m1_avista|yesno:'1,0' }}"
-                  data-split-remainder="{{ split_amount_2|floatformat:2 }}"
+                  data-split-remainder="{{ split_amount_2|unlocalize }}"
                   style="display:none;"></span>
 
             <div class="s-card fi fi-1" style="border:none;box-shadow:var(--shadow-h);">
@@ -665,6 +694,18 @@
                   </div>
                   {% endif %}
                   <div class="col-12">
+                    <div class="hi green" style="padding:.9rem 1.1rem;">
+                      <div class="d-flex justify-content-between align-items-center gap-3">
+                        <div>
+                          <div class="hi-l">Comissão líquida do vendedor (3%)</div>
+                          <div class="hi-v" style="font-size:1.2rem;">R$ {{ seller_commission_value|floatformat:2 }}</div>
+                        </div>
+                        <div class="small text-end" style="opacity:.9;">
+                          <div>Bruta: R$ {{ seller_commission_gross_value|floatformat:2 }}</div>
+                          <div>Frete: − R$ {{ freight_commission_deduction|floatformat:2 }}</div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
                 {% endif %}
@@ -718,13 +759,13 @@
 if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 
 var tariffsByType = JSON.parse('{{ tariffs_by_type_json|escapejs }}');
-var initDiscount  = parseFloat('{{ discount_percent }}');
-var initPriceInc  = parseFloat('{{ price_increase_pct }}');
-var initInstall   = parseInt('{{ sim_installments }}');
+var initDiscount  = parseFloat('{{ discount_percent|unlocalize }}');
+var initPriceInc  = parseFloat('{{ price_increase_pct|unlocalize }}');
+var initInstall   = parseInt('{{ sim_installments|unlocalize }}');
 var initPType     = '{{ sim_payment_type }}';
-var MARGIN_BASE   = parseFloat('{{ margin_base }}');
-var COMM_MIN      = parseFloat('{{ commission_floor }}');
-var COMM_MAX      = parseFloat('{{ original_commission_percent }}');
+var MARGIN_BASE   = parseFloat('{{ margin_base|unlocalize }}');
+var COMM_MIN      = parseFloat('{{ commission_floor|unlocalize }}');
+var COMM_MAX      = parseFloat('{{ original_commission_percent|unlocalize }}');
 var loadingBar    = document.getElementById('loading-bar');
 
 function showLoading() { loadingBar.classList.add('on'); }
@@ -743,7 +784,7 @@ function maskCurrency(el) {
 
 function formatInitialValue(el) {
   if (!el || !el.value) return;
-  var v = parseFloat(el.value);
+  var v = parseBRL(el.value);
   if (v > 0) el.value = v.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
   else el.value = '';
 }
@@ -752,6 +793,11 @@ function parseBRL(str) {
   if (!str) return 0;
   str = str.replace(/[^\d.,]/g, '').replace(/\./g, '').replace(',', '.');
   return parseFloat(str) || 0;
+}
+
+function financialWireValue(input) {
+  if (window.RoselarFinancialInputs) return window.RoselarFinancialInputs.toWireValue(input);
+  return input.value;
 }
 
 var _prevMarginExceeded = {{ margin_exceeded|yesno:'true,false' }};
@@ -1024,7 +1070,7 @@ function onSplitAmountChange(rawVal) {
   if (lbl) {
     var totalEl = document.getElementById('h-final-total') || document.getElementById('h-total');
     // tenta ler o total do campo oculto; se não existir, deixa o servidor atualizar
-    var serverFinal = parseFloat('{{ final_total|default:"0" }}') || 0;
+    var serverFinal = parseFloat('{{ final_total|default:"0"|unlocalize }}') || 0;
     if (amt > 0 && serverFinal > 0) {
       var rest = Math.max(0, serverFinal - amt);
       lbl.textContent = 'R$ ' + rest.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
@@ -1068,9 +1114,14 @@ function rebuildInst2Options() {
 function updateFeeDisplay(inst) {
   var pt = document.getElementById('sel-ptype').value;
   var opts = tariffsByType[pt] || [];
-  var fee = 0;
+  var fee = null;
   opts.forEach(function(o) { if (o.installments === inst) fee = o.fee; });
-  var txt = fee.toFixed(2) + '%';
+  var manual = document.getElementById('manual-fee-input');
+  var manualRow = document.getElementById('manual-fee-row');
+  var needsManual = pt === 'CREDIT_CARD' && fee === null;
+  if (manualRow) manualRow.style.display = needsManual ? 'block' : 'none';
+  var activeFee = needsManual && manual && manual.value !== '' ? parseFloat(manual.value) : fee;
+  var txt = activeFee === null || isNaN(activeFee) ? 'Informe' : activeFee.toFixed(2) + '%';
   var d1 = document.getElementById('fee-display'); if (d1) d1.textContent = txt;
   var d2 = document.getElementById('fee-display-single'); if (d2) d2.textContent = txt;
 }
@@ -1078,9 +1129,14 @@ function updateFeeDisplay(inst) {
 function updateFee2Display(inst) {
   var pt2 = document.getElementById('sel-ptype2').value;
   var opts = tariffsByType[pt2] || [];
-  var fee = 0;
+  var fee = null;
   opts.forEach(function(o) { if (o.installments === inst) fee = o.fee; });
-  var d = document.getElementById('fee2-display'); if (d) d.textContent = fee.toFixed(2) + '%';
+  var manual = document.getElementById('manual-fee2-input');
+  var manualRow = document.getElementById('manual-fee2-row');
+  var needsManual = pt2 === 'CREDIT_CARD' && fee === null;
+  if (manualRow) manualRow.style.display = needsManual ? 'block' : 'none';
+  var activeFee = needsManual && manual && manual.value !== '' ? parseFloat(manual.value) : fee;
+  var d = document.getElementById('fee2-display'); if (d) d.textContent = activeFee === null || isNaN(activeFee) ? 'Informe' : activeFee.toFixed(2) + '%';
 }
 
 var submitTimer = null;
@@ -1120,6 +1176,12 @@ function doSubmit() {
   fd.append('sim_payment_type',         document.getElementById('sel-ptype').value);
   fd.append('sim_has_architect',        document.getElementById('chk-architect').checked ? '1' : '0');
   if (archId) fd.append('sim_architect_id', archId);
+  var manualFee = document.getElementById('manual-fee-input');
+  if (manualFee && manualFee.value !== '') fd.append('manual_fee_percent', financialWireValue(manualFee));
+  var manualFee2 = document.getElementById('manual-fee2-input');
+  if (manualFee2 && manualFee2.value !== '') fd.append('manual_fee_percent_2', financialWireValue(manualFee2));
+  var freightDeduction = document.getElementById('freight-commission-input');
+  if (freightDeduction && freightDeduction.value !== '') fd.append('freight_commission_deduction', financialWireValue(freightDeduction));
   // down payment
   var dpHidVal = document.getElementById('h-down-payment');
   if (dpHidVal && dpHidVal.value) fd.append('down_payment_value', dpHidVal.value);
@@ -1320,6 +1382,12 @@ function saveConditions() {
   document.getElementById('save-arch-id').value = document.getElementById('h-architect-id').value;
   document.getElementById('save-disc').value  = document.getElementById('h-discount').value;
   document.getElementById('save-pi').value    = document.getElementById('h-price-inc').value;
+  var freightDeduction = document.getElementById('freight-commission-input');
+  document.getElementById('save-freight-commission').value = freightDeduction ? freightDeduction.value : '0';
+  var manualFee = document.getElementById('manual-fee-input');
+  document.getElementById('save-manual-fee').value = manualFee ? manualFee.value : '';
+  var manualFee2 = document.getElementById('manual-fee2-input');
+  document.getElementById('save-manual-fee-2').value = manualFee2 ? manualFee2.value : '';
   // split payment
   var splitOn = document.getElementById('chk-split').checked;
   document.getElementById('save-ptype2').value       = splitOn ? document.getElementById('sel-ptype2').value : '';
@@ -1400,7 +1468,7 @@ function resetSimulation() {
   updateFeeDisplay(initInstall);
   // Init method 2 if split mode is on
   var initPType2 = '{{ sim_payment_type_2 }}';
-  var initInstall2 = parseInt('{{ sim_installments_2 }}') || 1;
+  var initInstall2 = parseInt('{{ sim_installments_2|unlocalize }}') || 1;
   document.getElementById('h-ptype2').value        = initPType2;
   document.getElementById('h-installments2').value = initInstall2;
   rebuildInst2Options();

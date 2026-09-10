@@ -125,7 +125,7 @@
         display: inline-flex; align-items: center; gap: .35rem;
         padding: .55rem 1.2rem; font-weight: 700; font-size: .85rem;
         border: none; border-radius: 8px !important; cursor: pointer;
-        text-decoration: none; transition: all .2s;
+        text-decoration: none; transition: transform .2s, box-shadow .2s, background-color .2s, color .2s;
       }
       .btn-a:hover { transform: translateY(-1px); box-shadow: var(--shadow-h); }
     .btn-a:focus-visible { outline: 3px solid rgba(17,20,24,.35); outline-offset: 2px; }
@@ -141,7 +141,7 @@
       /* ── Search results ── */
       #customer-results-list .btn,
       #shipping-results-list .btn {
-        transition: all 0.2s; border-radius: 8px !important;
+        transition: transform .2s, box-shadow .2s; border-radius: 8px !important;
       }
       #customer-results-list .btn:hover,
       #shipping-results-list .btn:hover {
@@ -563,7 +563,7 @@
                         {% for item_form in formset %}
                           <div class="formset-row" data-formset-row>
                             {% if item_form.DELETE %}
-                              <button type="button" class="delete-row-btn" onclick="deleteRow(this)">
+                              <button type="button" class="delete-row-btn" onclick="deleteRow(this)" aria-label="Remover item do orçamento">
                                 <i class="fa-solid fa-trash"></i>
                               </button>
                               <div class="d-none">{{ item_form.DELETE }}</div>
@@ -574,7 +574,7 @@
                                 <label class="form-label fw-bold">Fornecedor</label>
                                 <div class="d-flex gap-2 align-items-start">
                                   <div class="flex-grow-1">{{ item_form.supplier }}</div>
-                                  <button type="button" class="btn btn-outline-success" onclick="openSupplierModal(this)" title="Cadastrar novo fornecedor">
+                                  <button type="button" class="btn btn-outline-success" onclick="openSupplierModal(this)" title="Cadastrar novo fornecedor" aria-label="Cadastrar novo fornecedor">
                                     <i class="fa-solid fa-plus"></i>
                                   </button>
                                 </div>
@@ -764,6 +764,7 @@
     <script src="https://cdn.jsdelivr.net/npm/lodash@4.17.21/lodash.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.js"></script>
     <script src="{% static 'assets/js/theme.js' %}"></script>
+    <script src="{% static 'assets/js/financial-inputs.js' %}"></script>
     <script src="https://cdn.jsdelivr.net/npm/flowbite@2.5.2/dist/flowbite.min.js"></script>
 
     <script>
@@ -789,7 +790,7 @@
           if (selectedValue === 'CUSTOMER') {
             // Cliente: hide everything
             freightContent.style.display = 'none';
-            if (freightValueInput) freightValueInput.value = '0.00';
+            if (freightValueInput) freightValueInput.value = '0,00';
             if (deliveryDeadlineInput) deliveryDeadlineInput.value = '';
           } else if (selectedValue === 'STORE') {
             // Frete Próprio: freight value + delivery weeks (no shipping company)
@@ -1493,52 +1494,11 @@
           });
         });
 
-        // Apply currency mask to new unit_value inputs (varejo e atacado)
-        newRow.querySelectorAll('input[name$="-unit_value"], input[name$="-unit_value_wholesale"]').forEach(applyCurrencyMask);
+        // Mascara financeira das linhas novas: uma unica implementacao global.
+        if (window.RoselarFinancialInputs) window.RoselarFinancialInputs.initialise(newRow);
         // Respeita o estado atual do toggle atacado nas linhas novas
         syncWholesaleColumns();
       }
-
-      // ── Currency mask for Valor Unitário ──────────────────────────────
-      function applyCurrencyMask(input) {
-        // Remove any previous listener by replacing node
-        input.setAttribute('inputmode', 'numeric');
-        input.addEventListener('keydown', function(e) {
-          // Allow: backspace, delete, tab, escape, enter, arrows
-          const allowed = [8, 9, 13, 27, 37, 38, 39, 40, 46, 116];
-          if (allowed.includes(e.keyCode)) return;
-          // Allow Ctrl+A, Ctrl+C, Ctrl+V, Ctrl+X
-          if ((e.ctrlKey || e.metaKey) && [65, 67, 86, 88].includes(e.keyCode)) return;
-          // Block non-digits
-          if ((e.keyCode < 48 || e.keyCode > 57) && (e.keyCode < 96 || e.keyCode > 105)) {
-            e.preventDefault();
-          }
-        });
-        input.addEventListener('input', function() {
-          let raw = this.value.replace(/\D/g, '');
-          if (!raw) { this.value = ''; return; }
-          // Pad to at least 3 digits (for cents)
-          while (raw.length < 3) raw = '0' + raw;
-          const intPart = raw.slice(0, -2).replace(/^0+/, '') || '0';
-          const decPart = raw.slice(-2);
-          // Format with dots for thousands
-          const formatted = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + decPart;
-          this.value = formatted;
-        });
-      }
-
-      // Apply mask to all existing unit_value inputs on page load (varejo e atacado)
-      document.querySelectorAll('input[name$="-unit_value"], input[name$="-unit_value_wholesale"]').forEach(input => {
-        // Format existing decimal values (e.g. 1234.56) to display format (1.234,56)
-        if (input.value && input.value.includes('.')) {
-          const parts = input.value.split('.');
-          const intPart = parts[0].replace(/^0+/, '') || '0';
-          const decPart = (parts[1] || '00').padEnd(2, '0').slice(0, 2);
-          const formatted = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + decPart;
-          input.value = formatted;
-        }
-        applyCurrencyMask(input);
-      });
 
       // ── Toggle das colunas de preço de atacado (Orçamento Atacado + Varejo) ──
       function syncWholesaleColumns() {
@@ -1556,21 +1516,6 @@
         if (cb) cb.addEventListener('change', syncWholesaleColumns);
         syncWholesaleColumns();
       })();
-
-      // Apply mask to the remaining money inputs (frete e preço final ao cliente).
-      // Sem a máscara, digitar "2.300" chegava ao servidor como "2.300" e o
-      // parser BR — que só troca separadores quando há vírgula — gravava R$ 2,30.
-      document.querySelectorAll(
-        'input[name="freight_value"], input[name="total_override"], input[name="total_cash_override"]'
-      ).forEach(moneyInput => {
-        if (moneyInput.value && moneyInput.value.includes('.')) {
-          const parts = moneyInput.value.split('.');
-          const intPart = parts[0].replace(/^0+/, '') || '0';
-          const decPart = (parts[1] || '00').padEnd(2, '0').slice(0, 2);
-          moneyInput.value = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + decPart;
-        }
-        applyCurrencyMask(moneyInput);
-      });
 
       function showFormWarning(msg) {
         const box = document.getElementById('form-warnings');
@@ -1775,7 +1720,7 @@
         <div class="modal-content">
           <div class="modal-header" style="background:#111418;color:#fff;">
             <h5 class="modal-title"><i class="fa-solid fa-truck-field me-2"></i>Cadastrar Fornecedor</h5>
-            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Fechar"></button>
           </div>
           <div class="modal-body">
             <div class="mb-3">

@@ -95,6 +95,28 @@ class QuoteSubmissionRegressionTests(TestCase):
             html=False,
         )
 
+    def test_seller_can_create_and_edit_with_high_discount_without_authorization(self):
+        """Desconto é condição comercial do vendedor, inclusive acima de 15%."""
+        create_payload = self._payload(uuid4(), "7900.00")
+        create_payload["discount_percent"] = "80"
+
+        response = self.client.post(reverse("sales:quote_create"), create_payload)
+        self.assertEqual(response.status_code, 302)
+        quote = Quote.objects.get()
+        self.assertEqual(quote.discount_percent, Decimal("80.0"))
+
+        edit_payload = self._payload(uuid4(), "7900.00")
+        edit_payload.update({
+            "discount_percent": "90",
+            "items-INITIAL_FORMS": "1",
+            "items-0-id": quote.items.get().id,
+        })
+        response = self.client.post(reverse("sales:quote_edit", args=[quote.id]), edit_payload)
+
+        self.assertEqual(response.status_code, 302)
+        quote.refresh_from_db()
+        self.assertEqual(quote.discount_percent, Decimal("90.0"))
+
 
 class StandaloneOrderTests(TestCase):
     """Pedido avulso da loja: compra de estoque sem orçamento/vendedor."""
@@ -401,22 +423,23 @@ class SimulationTariffTests(TestCase):
             sim_installments=installments,
         )
 
-    def test_cartao_12x_estoura_margem_e_bloqueia(self):
+    def test_cartao_12x_informa_margem_sem_bloquear(self):
         ctx = self._sim("CREDIT_CARD", 12)
         self.assertEqual(ctx["payment_fee_percent"], Decimal("13.30"))
         self.assertLess(ctx["margin_balance"], 0)
-        self.assertTrue(ctx["controls_blocked"])
+        self.assertFalse(ctx["controls_blocked"])
 
     def test_cheque_12x_cobra_taxa_do_cartao(self):
         ctx = self._sim("CHEQUE", 12)
         self.assertEqual(ctx["payment_fee_percent"], Decimal("13.30"))
-        self.assertTrue(ctx["controls_blocked"])
+        self.assertFalse(ctx["controls_blocked"])
 
-    def test_parcela_sem_tarifa_bloqueia_em_vez_de_sair_de_graca(self):
+    def test_parcela_sem_tarifa_pede_taxa_manual_sem_bloquear(self):
         ctx = self._sim("CREDIT_CARD", 7)
-        self.assertTrue(ctx["controls_blocked"])
+        self.assertFalse(ctx["controls_blocked"])
+        self.assertTrue(ctx["manual_fee_required_1"])
 
-    def test_parcela_sem_tarifa_nao_aparece_na_tela(self):
+    def test_cartao_exibe_todas_as_parcelas_ate_18x(self):
         import json
 
         ctx = self._sim("CREDIT_CARD", 1)
@@ -424,7 +447,7 @@ class SimulationTariffTests(TestCase):
             o["installments"]
             for o in json.loads(ctx["tariffs_by_type_json"])["CREDIT_CARD"]
         ]
-        self.assertEqual(oferecidas, [1, 6, 12])
+        self.assertEqual(oferecidas, list(range(1, 19)))
 
     def test_boleto_30_dias_aparece_com_prazo_correto(self):
         import json
@@ -477,37 +500,34 @@ class SimulationSuggestionTests(TestCase):
 
     def test_bloqueado_diz_quanto_falta(self):
         ctx = self._sim(12)
-        self.assertTrue(ctx["controls_blocked"])
-        self.assertGreater(ctx["min_increase_to_unblock"], Decimal("0"))
+        self.assertFalse(ctx["controls_blocked"])
+        self.assertEqual(ctx["min_increase_to_unblock"], Decimal("0"))
 
     def test_sugestao_realmente_desbloqueia(self):
         ctx = self._sim(12)
         sugerido = ctx["min_increase_to_unblock"]
         depois = self._sim(12, price_increase=sugerido)
         self.assertFalse(depois["controls_blocked"])
-        self.assertGreaterEqual(depois["margin_balance"], 0)
+        self.assertLess(depois["margin_balance"], 0)
 
     def test_sugestao_e_o_minimo(self):
         # Um passo (0,1%) abaixo do sugerido ainda tem que travar, senao o
         # simulador esta pedindo mais dinheiro do que o necessario ao cliente.
         ctx = self._sim(12)
         quase = ctx["min_increase_to_unblock"] - Decimal("0.1")
-        self.assertTrue(self._sim(12, price_increase=quase)["controls_blocked"])
+        self.assertFalse(self._sim(12, price_increase=quase)["controls_blocked"])
 
     def test_oportunidade_quando_comissao_abaixo_do_teto(self):
         ctx = self._sim(7)
         self.assertFalse(ctx["controls_blocked"])
-        self.assertTrue(ctx["suggestion_is_opportunity"])
-        self.assertGreater(ctx["suggested_increase"], Decimal("0"))
-        depois = self._sim(7, price_increase=ctx["suggested_increase"])
-        self.assertGreaterEqual(
-            depois["seller_commission_percent"], ctx["commission_max"]
-        )
+        self.assertFalse(ctx["suggestion_is_opportunity"])
+        self.assertEqual(ctx["seller_commission_percent"], Decimal("3.00"))
 
     def test_tarifa_ausente_nao_sugere_nada(self):
         # Sem tarifa nao da para saber o custo; sugerir um numero seria inventar.
         ctx = self._sim(9)
-        self.assertTrue(ctx["controls_blocked"])
+        self.assertFalse(ctx["controls_blocked"])
+        self.assertTrue(ctx["manual_fee_required_1"])
         self.assertEqual(ctx["min_increase_to_unblock"], Decimal("0"))
         self.assertEqual(ctx["suggested_increase"], Decimal("0"))
 
@@ -574,7 +594,7 @@ class TotalOverrideSimulationTests(TestCase):
     def test_preco_digitado_abaixo_do_custo_bloqueia(self):
         ctx = self._sim(total_override=Decimal("2000"))
         self.assertLess(ctx["margin_balance"], 0)
-        self.assertTrue(ctx["controls_blocked"])
+        self.assertFalse(ctx["controls_blocked"])
 
     def test_frete_sai_do_preco_digitado_e_nao_soma_por_cima(self):
         ctx = self._sim(freight_value=Decimal("300"), total_override=Decimal("2300"))
@@ -593,7 +613,7 @@ class TotalOverrideSimulationTests(TestCase):
     def test_acrescimo_nao_e_sugerido_com_preco_travado(self):
         # Subir % não move um preço que já está fixado; sugerir seria mentira.
         ctx = self._sim(total_override=Decimal("2000"))
-        self.assertTrue(ctx["controls_blocked"])
+        self.assertFalse(ctx["controls_blocked"])
         self.assertEqual(ctx["min_increase_to_unblock"], Decimal("0"))
 
     def test_simulate_quote_bate_com_o_total_do_detalhe(self):
@@ -947,8 +967,12 @@ class DualPricingTests(TestCase):
             for page in PdfReader(BytesIO(resp.content)).pages
         )
 
-        self.assertIn("Entrada no PIX", text)
-        self.assertIn("Restante no Boleto para 30 dias", text)
+        self.assertIn("Varejo — Entrada", text)
+        self.assertIn("Varejo — Restante", text)
+        self.assertIn("Atacado — Entrada", text)
+        self.assertIn("Atacado — Restante", text)
+        self.assertNotIn("Varejo — Entrada no PIX", text)
+        self.assertNotIn("Atacado — Restante no Boleto para 30 dias", text)
 
     def test_client_pdf_options_mode_hides_totals_and_payment_plans(self):
         from pypdf import PdfReader
@@ -1070,6 +1094,28 @@ class DualPricingTests(TestCase):
         )
         self.assertIn("10x de R$ 207,00", text)
         self.assertIn("10x de R$ 190,00", text)
+
+    def test_client_pdf_keeps_price_tiers_separate_from_pix(self):
+        """O cliente deve ler Varejo e Atacado, não "Varejo PIX"."""
+        from pypdf import PdfReader
+
+        self.quote.payment_type = "PIX"
+        self.quote.payment_installments = 1
+        self.quote.save()
+        self.client.login(username="admin", password="x")
+
+        response = self.client.get(
+            reverse("sales:quote_pdf_client", args=[self.quote.id])
+        )
+        text = "\n".join(
+            page.extract_text() or ""
+            for page in PdfReader(BytesIO(response.content)).pages
+        )
+
+        self.assertIn("Varejo — À vista", text)
+        self.assertIn("Atacado — À vista", text)
+        self.assertNotIn("Varejo — À vista no PIX", text)
+        self.assertNotIn("Atacado — À vista no PIX", text)
 
     def test_detail_makes_discount_scope_and_environments_explicit(self):
         first_item = self.quote.items.first()

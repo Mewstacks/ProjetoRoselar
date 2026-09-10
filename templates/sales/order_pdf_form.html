@@ -232,6 +232,7 @@
                         <td style="padding:.55rem .8rem;">
                           <input type="text" name="price_{{ item.id }}"
                                  class="f-input" style="text-align:right;padding:.4rem .7rem;"
+                                 inputmode="numeric" data-financial="money"
                                  placeholder="0,00" autocomplete="off" required>
                         </td>
                       </tr>
@@ -258,5 +259,6 @@
   </main>
 
   <script src="{% static 'assets/js/theme.js' %}"></script>
+  <script src="{% static 'assets/js/financial-inputs.js' %}"></script>
 </body>
 </html>

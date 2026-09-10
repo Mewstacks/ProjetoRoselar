@@ -6,19 +6,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Relatórios | Roselar</title>
   <link rel="shortcut icon" type="image/x-icon" href="{% static 'assets/img/favicons/favicon.ico' %}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200;300;400;500;600;700&display=swap" rel="stylesheet">
   <link href="{% static 'assets/css/theme.min.css' %}" rel="stylesheet">
   <link href="{% static 'assets/css/user.css' %}" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/flowbite@2.5.2/dist/flowbite.min.css" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <style>:root{--brand:#111418;}body{font-variant-numeric:tabular-nums;font-family:'Manrope',sans-serif;}input::placeholder,textarea::placeholder{color:#565C66;opacity:1;}.report-card{background:#fff;border:1px solid #dee2e6;border-radius:8px;padding:1.5rem;transition:box-shadow .2s,transform .15s;text-decoration:none;color:inherit;display:block;}.report-card:hover{box-shadow:0 4px 14px rgba(0,0,0,.1);transform:translateY(-2px);color:inherit;}.report-card .icon{width:48px;height:48px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:1.2rem;color:#fff;margin-bottom:.75rem;}</style>
+  <style>:root{--brand:#111418;}body{font-variant-numeric:tabular-nums;font-family:'Manrope',sans-serif;}input::placeholder,textarea::placeholder{color:#565C66;opacity:1;}.report-card{background:#fff;border:1px solid #dee2e6;border-radius:8px;padding:1.5rem;transition:box-shadow .2s,transform .15s;text-decoration:none;color:inherit;display:block;}.report-card:hover{box-shadow:0 4px 14px rgba(0,0,0,.1);transform:translateY(-2px);color:inherit;}.report-card:focus-visible{outline:3px solid #0d6efd;outline-offset:3px;color:inherit;}.report-card .icon{width:48px;height:48px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:1.2rem;color:#fff;margin-bottom:.75rem;}.skip-link{left:.75rem;position:fixed;top:.75rem;transform:translateY(-200%);z-index:1100;}.skip-link:focus{transform:translateY(0);}</style>
 </head>
 <body>
+  <a class="btn btn-light skip-link" href="#report-content">Pular para o conteúdo</a>
   <main class="main" id="top">
     <nav class="navbar navbar-expand-lg fixed-top navbar-dark" data-navbar-on-scroll="data-navbar-on-scroll">
       <div class="container">
-        <a class="navbar-brand" href="{% url 'core:index' %}"><img src="{% static 'assets/img/Logo.png' %}?v=2" alt="Roselar — Início" style="height:40px;"></a>
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent"><i class="fa-solid fa-bars text-white fs-3"></i></button>
+        <a class="navbar-brand" href="{% url 'core:index' %}"><img src="{% static 'assets/img/Logo.png' %}?v=2" alt="Roselar — Início" width="160" height="40" style="height:40px;"></a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent" aria-label="Abrir navegação" aria-controls="navbarSupportedContent" aria-expanded="false"><i class="fa-solid fa-bars text-white fs-3" aria-hidden="true"></i></button>
         <div class="collapse navbar-collapse" id="navbarSupportedContent">
           <ul class="navbar-nav ms-auto align-items-center">
             <li class="nav-item"><a class="nav-link" href="{% url 'core:index' %}">Início</a></li>
@@ -32,7 +35,7 @@
               <button id="dropdownUserButton" data-dropdown-toggle="dropdownUser" class="btn btn-light text-black d-flex align-items-center" type="button"><span class="me-2">{{ user.username }}</span></button>
               <div id="dropdownUser" class="z-10 hidden bg-white divide-y divide-gray-100 rounded-lg shadow w-72">
                 <div class="px-4 py-3 text-sm text-gray-900"><div class="font-medium">{{ user.username }}</div></div>
-                <ul class="py-2 text-sm text-gray-700"><li><a href="{% url 'core:dashboard' %}" class="block px-4 py-2 hover:bg-gray-100"><i class="fa-solid fa-user me-2"></i>Minha Conta</a></li></ul>
+                <ul class="py-2 text-sm text-gray-700"><li><a href="{% url 'core:dashboard' %}" class="block px-4 py-2 hover:bg-gray-100"><i class="fa-solid fa-user me-2" aria-hidden="true"></i>Minha Conta</a></li></ul>
                 <div class="py-2"><a href="{% url 'accounts:logout' %}" class="block px-4 py-2 text-sm text-red-700 hover:bg-gray-100">Sair</a></div>
               </div>
             </li>
@@ -41,46 +44,60 @@
       </div>
     </nav>
 
-    <section class="py-5" style="min-height:100vh;">
+    <section id="report-content" class="py-5" style="min-height:100vh;" tabindex="-1">
       <div style="position:absolute;top:0;left:0;right:0;height:30vh;background:var(--brand);z-index:-1;"></div>
       <div class="container" style="margin-top:80px;">
         <div class="bg-white shadow-sm p-4 mb-4" style="border-radius:8px;">
-          <h1 class="h4 fw-bold mb-0" style="color:var(--brand);"><i class="fa-solid fa-chart-bar me-2"></i>Central de Relatórios</h1>
+          <h1 class="h4 fw-bold mb-0" style="color:var(--brand);"><i class="fa-solid fa-chart-bar me-2" aria-hidden="true"></i>Central de Relatórios</h1>
         </div>
 
         <div class="row g-4">
           <div class="col-md-6 col-lg-3">
             <a href="{% url 'core:report_sales' %}" class="report-card">
-              <div class="icon" style="background:#198754;"><i class="fa-solid fa-dollar-sign"></i></div>
+              <div class="icon" style="background:#198754;"><i class="fa-solid fa-dollar-sign" aria-hidden="true"></i></div>
               <h5 class="fw-bold">Vendas</h5>
               <p class="text-muted small mb-0">Relatório de vendas por período e vendedor com totais.</p>
             </a>
           </div>
           <div class="col-md-6 col-lg-3">
             <a href="{% url 'core:report_commissions' %}" class="report-card">
-              <div class="icon" style="background:#0d6efd;"><i class="fa-solid fa-percent"></i></div>
+              <div class="icon" style="background:#0d6efd;"><i class="fa-solid fa-percent" aria-hidden="true"></i></div>
               <h5 class="fw-bold">Comissões</h5>
-              <p class="text-muted small mb-0">Comissão estimada por vendedor baseada em margem.</p>
+              <p class="text-muted small mb-0">Comissões brutas, fretes abatidos e valores líquidos por vendedor.</p>
             </a>
           </div>
           <div class="col-md-6 col-lg-3">
             <a href="{% url 'core:report_discounts' %}" class="report-card">
-              <div class="icon" style="background:#ffc107;"><i class="fa-solid fa-tags"></i></div>
+              <div class="icon" style="background:#ffc107;"><i class="fa-solid fa-tags" aria-hidden="true"></i></div>
               <h5 class="fw-bold">Descontos</h5>
-              <p class="text-muted small mb-0">Análise de descontos concedidos e autorizações.</p>
+              <p class="text-muted small mb-0">Análise de descontos concedidos por período e vendedor.</p>
             </a>
           </div>
           <div class="col-md-6 col-lg-3">
             <a href="{% url 'core:report_products' %}" class="report-card">
-              <div class="icon" style="background:#6f42c1;"><i class="fa-solid fa-box"></i></div>
+              <div class="icon" style="background:#6f42c1;"><i class="fa-solid fa-box" aria-hidden="true"></i></div>
               <h5 class="fw-bold">Produtos</h5>
               <p class="text-muted small mb-0">Ranking de produtos mais vendidos por valor.</p>
+            </a>
+          </div>
+          <div class="col-md-6 col-lg-3">
+            <a href="{% url 'core:report_freights' %}" class="report-card">
+              <div class="icon" style="background:#fd7e14;"><i class="fa-solid fa-truck" aria-hidden="true"></i></div>
+              <h5 class="fw-bold">Fretes</h5>
+              <p class="text-muted small mb-0">Fretes abatidos das comissões no período.</p>
+            </a>
+          </div>
+          <div class="col-md-6 col-lg-3">
+            <a href="{% url 'core:report_card_sales' %}" class="report-card">
+              <div class="icon" style="background:#0dcaf0;"><i class="fa-solid fa-credit-card" aria-hidden="true"></i></div>
+              <h5 class="fw-bold">Vendas no Cartão</h5>
+              <p class="text-muted small mb-0">Parcelas e taxas aplicadas em cada venda.</p>
             </a>
           </div>
           {% if user.is_superuser or user.role == 'ADMIN' %}
           <div class="col-md-6 col-lg-3">
             <a href="{% url 'core:audit_log_list' %}" class="report-card">
-              <div class="icon" style="background:#111418;"><i class="fa-solid fa-shield"></i></div>
+              <div class="icon" style="background:#111418;"><i class="fa-solid fa-shield" aria-hidden="true"></i></div>
               <h5 class="fw-bold">Auditoria</h5>
               <p class="text-muted small mb-0">Alterações em vendas, com valor anterior e novo.</p>
             </a>
@@ -89,7 +106,7 @@
         </div>
 
         <div class="mt-4">
-          <a href="{% url 'core:report_csv_export' %}" class="btn btn-outline-dark"><i class="fa-solid fa-file-csv me-1"></i>Exportar Vendas do Ciclo Atual (CSV)</a>
+          <a href="{% url 'core:report_csv_export' %}" class="btn btn-outline-dark"><i class="fa-solid fa-file-csv me-1" aria-hidden="true"></i>Exportar Vendas do Ciclo Atual (CSV)</a>
           <p class="small text-muted mt-2 mb-0">Para exportar outro período ou um vendedor específico, use o botão dentro do Relatório de Vendas.</p>
         </div>
       </div>

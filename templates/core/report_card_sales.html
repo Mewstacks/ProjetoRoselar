@@ -1,0 +1,59 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111418">
+  <title>Vendas no Cartão | Roselar</title>
+  <link rel="shortcut icon" type="image/x-icon" href="{% static 'assets/img/favicons/favicon.ico' %}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link href="{% static 'assets/css/theme.min.css' %}" rel="stylesheet">
+  <link href="{% static 'assets/css/user.css' %}" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <style>
+    :root { --brand: #111418; }
+    body { background: #f4f6f9; font-family: Manrope, sans-serif; font-variant-numeric: tabular-nums; }
+    .page-head { background: var(--brand); color: #fff; }
+    .card { border-radius: 10px; }
+    .skip-link { left: .75rem; position: fixed; top: .75rem; transform: translateY(-200%); z-index: 1100; }
+    .skip-link:focus { transform: translateY(0); }
+    a:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid #0d6efd; outline-offset: 2px; }
+  </style>
+</head>
+<body>
+  <a class="btn btn-light skip-link" href="#report-content">Pular para o conteúdo</a>
+  <main id="report-content" tabindex="-1">
+    <header class="page-head py-4 mb-4">
+      <div class="container">
+        <a href="{% url 'core:reports_hub' %}" class="text-white text-decoration-none small"><i class="fa-solid fa-arrow-left me-1" aria-hidden="true"></i>Relatórios</a>
+        <h1 class="h4 fw-bold mt-2 mb-0"><i class="fa-solid fa-credit-card me-2" aria-hidden="true"></i>Relatório de Vendas no Cartão</h1>
+        <p class="mb-0 small opacity-75">Parcelas e taxas por venda · {{ period_start|date:"d/m/Y" }} a {{ period_end|date:"d/m/Y" }}</p>
+      </div>
+    </header>
+    <div class="container pb-5">
+      <form method="get" class="card card-body shadow-sm mb-3">
+        <div class="d-flex align-items-end gap-2 flex-wrap">
+          {% include "core/_period_filter.html" %}
+          <button class="btn btn-primary" type="submit"><i class="fa-solid fa-filter me-1" aria-hidden="true"></i>Filtrar</button>
+        </div>
+      </form>
+      <div class="row g-3 mb-3">
+        <div class="col-md-6"><div class="card card-body text-center"><div class="small text-uppercase text-muted fw-bold">Condições no cartão</div><strong class="fs-4">{{ count }}</strong></div></div>
+        <div class="col-md-6"><div class="card card-body text-center"><div class="small text-uppercase text-muted fw-bold">Valor total no cartão</div><strong class="fs-4" style="color:var(--brand)">R$ {{ total_card|floatformat:2 }}</strong></div></div>
+      </div>
+      <div class="card shadow-sm overflow-hidden">
+        <div class="table-responsive">
+          <table class="table table-hover align-middle mb-0">
+            <caption class="visually-hidden">Vendas no cartão, parcelas e taxas por condição de pagamento.</caption>
+            <thead class="table-dark"><tr><th scope="col">Data</th><th scope="col">Venda</th><th scope="col">Cliente</th><th scope="col">Vendedor</th><th scope="col">Parte</th><th scope="col" class="text-end">Valor no cartão</th><th scope="col" class="text-center">Parcelas</th><th scope="col" class="text-end">Taxa</th></tr></thead>
+            <tbody>{% for sale in sales %}<tr><td>{{ sale.quote.sold_on|date:"d/m/Y" }}</td><td><a href="{% url 'sales:quote_detail' sale.quote.id %}">{{ sale.quote.number }}</a></td><td>{{ sale.quote.customer.name }}</td><td>{{ sale.quote.seller.get_full_name|default:sale.quote.seller.username }}</td><td>{{ sale.leg }}</td><td class="text-end fw-bold">R$ {{ sale.amount|floatformat:2 }}</td><td class="text-center">{{ sale.installments }}x</td><td class="text-end">{{ sale.fee_percent|floatformat:2 }}%</td></tr>{% empty %}<tr><td colspan="8" class="text-center text-muted py-5">Nenhuma venda no cartão neste período.</td></tr>{% endfor %}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
+</body>
+</html>

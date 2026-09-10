@@ -11,9 +11,10 @@
   <link href="{% static 'assets/css/user.css' %}" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/flowbite@2.5.2/dist/flowbite.min.css" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <style>:root{--brand:#111418;}body{font-variant-numeric:tabular-nums;font-family:'Manrope',sans-serif;}input::placeholder,textarea::placeholder{color:#565C66;opacity:1;}</style>
+  <style>:root{--brand:#111418;}body{font-variant-numeric:tabular-nums;font-family:'Manrope',sans-serif;}input::placeholder,textarea::placeholder{color:#565C66;opacity:1;}.skip-link{left:.75rem;position:fixed;top:.75rem;transform:translateY(-200%);z-index:1100;}.skip-link:focus{transform:translateY(0);}</style>
 </head>
 <body>
+  <a class="btn btn-light skip-link" href="#report-content">Pular para o conteúdo</a>
   <main class="main" id="top">
     <nav class="navbar navbar-expand-lg fixed-top navbar-dark" data-navbar-on-scroll="data-navbar-on-scroll">
       <div class="container">
@@ -31,23 +32,24 @@
         </div>
       </div>
     </nav>
-    <section class="py-5" style="min-height:100vh;">
+    <section id="report-content" class="py-5" style="min-height:100vh;" tabindex="-1">
       <div style="position:absolute;top:0;left:0;right:0;height:30vh;background:var(--brand);z-index:-1;"></div>
       <div class="container" style="margin-top:80px;">
         <div class="bg-white shadow-sm p-4 mb-4" style="border-radius:8px;">
-          <a href="{% url 'core:reports_hub' %}" class="text-decoration-none" style="color:var(--brand);"><i class="fa-solid fa-arrow-left me-1"></i>Relatórios</a>
-          <h1 class="h4 fw-bold mt-1 mb-0" style="color:var(--brand);"><i class="fa-solid fa-percent me-2"></i>Relatório de Comissões</h1>
+          <a href="{% url 'core:reports_hub' %}" class="text-decoration-none" style="color:var(--brand);"><i class="fa-solid fa-arrow-left me-1" aria-hidden="true"></i>Relatórios</a>
+          <h1 class="h4 fw-bold mt-1 mb-0" style="color:var(--brand);"><i class="fa-solid fa-percent me-2" aria-hidden="true"></i>Relatório de Comissões</h1>
           <div class="small fw-bold text-muted mt-1 mb-2">{% if cycle_label %}{{ cycle_label }} &middot; {% endif %}{{ period_start|date:"d/m/Y" }} a {{ period_end|date:"d/m/Y" }}</div>
           <form method="get" class="d-flex gap-2 align-items-end flex-wrap">
             {% include "core/_period_filter.html" %}
-            <button type="submit" class="btn btn-primary btn-sm"><i class="fa-solid fa-search me-1"></i>Filtrar</button>
+            <button type="submit" class="btn btn-primary btn-sm"><i class="fa-solid fa-search me-1" aria-hidden="true"></i>Filtrar</button>
           </form>
         </div>
 
         <div class="row g-3 mb-4">
-          <div class="col-md-4"><div class="bg-white border p-3 text-center" style="border-radius:8px;"><div style="font-size:.75rem;color:#6c757d;text-transform:uppercase;font-weight:600;">Vendas no Período</div><div class="fw-bold fs-4" style="color:var(--brand);">{{ sales_count }}</div></div></div>
-          <div class="col-md-4"><div class="bg-white border p-3 text-center" style="border-radius:8px;"><div style="font-size:.75rem;color:#6c757d;text-transform:uppercase;font-weight:600;">Faturamento</div><div class="fw-bold fs-4" style="color:var(--brand);">R$ {{ total_sold_period|floatformat:2 }}</div></div></div>
-          <div class="col-md-4"><div class="bg-white border p-3 text-center" style="border-radius:8px;"><div style="font-size:.75rem;color:#6c757d;text-transform:uppercase;font-weight:600;">Comissão Total</div><div class="fw-bold fs-4" style="color:#198754;">R$ {{ total_commission|floatformat:2 }}</div></div></div>
+          <div class="col-md-3"><div class="bg-white border p-3 text-center" style="border-radius:8px;"><div style="font-size:.75rem;color:#6c757d;text-transform:uppercase;font-weight:600;">Vendas no Período</div><div class="fw-bold fs-4" style="color:var(--brand);">{{ sales_count }}</div></div></div>
+          <div class="col-md-3"><div class="bg-white border p-3 text-center" style="border-radius:8px;"><div style="font-size:.75rem;color:#6c757d;text-transform:uppercase;font-weight:600;">Faturamento</div><div class="fw-bold fs-4" style="color:var(--brand);">R$ {{ total_sold_period|floatformat:2 }}</div></div></div>
+          <div class="col-md-3"><div class="bg-white border p-3 text-center" style="border-radius:8px;"><div style="font-size:.75rem;color:#6c757d;text-transform:uppercase;font-weight:600;">Comissão Bruta</div><div class="fw-bold fs-4" style="color:var(--brand);">R$ {{ total_commission_gross|floatformat:2 }}</div></div></div>
+          <div class="col-md-3"><div class="bg-white border p-3 text-center" style="border-radius:8px;"><div style="font-size:.75rem;color:#6c757d;text-transform:uppercase;font-weight:600;">Comissão Líquida</div><div class="fw-bold fs-4" style="color:#198754;">R$ {{ total_commission|floatformat:2 }}</div><div class="small text-muted">Fretes: − R$ {{ total_freight_deduction|floatformat:2 }}</div></div></div>
         </div>
 
         {% if pending_count or estimated_count or finance_count %}
@@ -62,7 +64,7 @@
         <div class="bg-white shadow-sm" style="border-radius:8px;overflow:hidden;">
           <div class="table-responsive">
             <table class="table table-hover mb-0" style="font-size:.85rem;">
-              <thead style="background:var(--brand);color:#fff;"><tr><th>Vendedor</th><th>Vendas (participações)</th><th class="text-end">Total Vendido</th><th>Desc. Médio</th><th>% s/ faturamento</th><th class="text-end">Comissão</th></tr></thead>
+              <thead style="background:var(--brand);color:#fff;"><tr><th>Vendedor</th><th>Vendas (participações)</th><th class="text-end">Total Vendido</th><th>Desc. Médio</th><th class="text-end">Comissão Bruta</th><th class="text-end">Frete</th><th class="text-end">Comissão Líquida</th></tr></thead>
               <tbody>
                 {% for c in commissions %}
                 <tr>
@@ -70,11 +72,12 @@
                   <td>{{ c.count }}</td>
                   <td class="text-end">R$ {{ c.total_sold|floatformat:2 }}</td>
                   <td>{{ c.avg_discount }}%</td>
-                  <td>{{ c.comm_pct }}%</td>
+                  <td class="text-end">R$ {{ c.gross_commission|floatformat:2 }}</td>
+                  <td class="text-end text-danger">− R$ {{ c.freight_deduction|floatformat:2 }}</td>
                   <td class="text-end fw-bold" style="color:#198754;">R$ {{ c.est_commission|floatformat:2 }}</td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="6" class="text-center text-muted py-4">Nenhum dado encontrado. <a href="{{ prev_cycle_qs }}" class="fw-bold text-decoration-underline" style="color:var(--brand);">Ver {{ prev_cycle_label }}</a></td></tr>
+                <tr><td colspan="7" class="text-center text-muted py-4">Nenhum dado encontrado. <a href="{{ prev_cycle_qs }}" class="fw-bold text-decoration-underline" style="color:var(--brand);">Ver {{ prev_cycle_label }}</a></td></tr>
                 {% endfor %}
               </tbody>
             </table>

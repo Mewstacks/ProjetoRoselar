@@ -49,7 +49,10 @@ class QuoteForm(forms.ModelForm):
     # vazio = None (usa o total calculado).
     total_override = forms.CharField(
         required=False,
-        widget=forms.TextInput(attrs={"class": "form-control", "inputmode": "numeric", "placeholder": "0,00"}),
+        widget=forms.TextInput(attrs={
+            "class": "form-control", "inputmode": "numeric", "placeholder": "0,00",
+            "data-financial": "money",
+        }),
         label="Preço Final ao Cliente (R$)",
     )
 
@@ -70,7 +73,10 @@ class QuoteForm(forms.ModelForm):
     # vazio = o orçamento não oferece condição à vista.
     total_cash_override = forms.CharField(
         required=False,
-        widget=forms.TextInput(attrs={"class": "form-control", "inputmode": "numeric", "placeholder": "0,00"}),
+        widget=forms.TextInput(attrs={
+            "class": "form-control", "inputmode": "numeric", "placeholder": "0,00",
+            "data-financial": "money",
+        }),
         label="Preço Final à Vista (R$)",
     )
 
@@ -111,7 +117,10 @@ class QuoteForm(forms.ModelForm):
         widgets = {
             "quote_date": forms.DateInput(attrs={"class": "form-control", "type": "date"}, format="%Y-%m-%d"),
             "sale_date": forms.DateInput(attrs={"class": "form-control", "type": "date"}, format="%Y-%m-%d"),
-            "freight_value": forms.TextInput(attrs={"class": "form-control", "inputmode": "numeric", "placeholder": "0,00"}),
+            "freight_value": forms.TextInput(attrs={
+                "class": "form-control", "inputmode": "numeric", "placeholder": "0,00",
+                "data-financial": "money",
+            }),
             "delivery_days_min": forms.NumberInput(attrs={"class": "form-control", "min": "1", "placeholder": "Ex: 15"}),
             "delivery_days_max": forms.NumberInput(attrs={"class": "form-control", "min": "1", "placeholder": "Ex: 20"}),
             "payment_installments": forms.Select(attrs={"class": "form-control"}),
@@ -204,21 +213,31 @@ class QuoteItemForm(forms.ModelForm):
     # Make architect_percent not required and hidden by default
     architect_percent = forms.DecimalField(
         required=False,
-        widget=forms.NumberInput(attrs={'class': 'form-control', 'step': '0.1'}),
+        widget=forms.TextInput(attrs={
+            'class': 'form-control',
+            'inputmode': 'decimal',
+            'data-financial': 'percent',
+            'placeholder': '0,00',
+        }),
         label="% Arquiteto"
     )
     
     # Override unit_value as CharField to accept Brazilian currency format
     unit_value = forms.CharField(
         required=True,
-        widget=forms.TextInput(attrs={'class': 'form-control', 'inputmode': 'numeric'}),
+        widget=forms.TextInput(attrs={
+            'class': 'form-control', 'inputmode': 'numeric', 'data-financial': 'money',
+        }),
         label="Valor Unitário"
     )
 
     # Preço de atacado (opcional, só usado quando o orçamento é atacado+varejo)
     unit_value_wholesale = forms.CharField(
         required=False,
-        widget=forms.TextInput(attrs={'class': 'form-control', 'inputmode': 'numeric', 'placeholder': '0,00'}),
+        widget=forms.TextInput(attrs={
+            'class': 'form-control', 'inputmode': 'numeric', 'placeholder': '0,00',
+            'data-financial': 'money',
+        }),
         label="Valor Atacado"
     )
     
@@ -362,7 +381,12 @@ class OrderForm(forms.ModelForm):
 class OrderItemForm(forms.ModelForm):
     purchase_unit_cost = forms.CharField(
         required=True,
-        widget=forms.TextInput(attrs={"class": "form-control", "inputmode": "numeric", "placeholder": "0,00"}),
+        widget=forms.TextInput(attrs={
+            "class": "form-control",
+            "inputmode": "numeric",
+            "placeholder": "0,00",
+            "data-financial": "money",
+        }),
         label="Custo de Compra (R$)",
     )
 

@@ -15,7 +15,7 @@ from django.test import RequestFactory, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from core.models import Customer, PaymentTariff, PaymentMethodType
+from core.models import Customer, PaymentTariff, PaymentMethodType, SalesGoal
 from core.views import _cycle_choices, _product_revenue, _report_period
 from sales.margin import persist_quote_commission, simulate_quote
 from sales.models import CommissionSource, Quote, QuoteCommissionSplit, QuoteStatus
@@ -117,12 +117,12 @@ class CommissionReportTests(ReportTestBase):
         persist_quote_commission(quote)
         return quote
 
-    def test_boleto_a_vista_pays_4_percent_not_3(self):
+    def test_boleto_a_vista_pays_fixed_3_percent(self):
         """Regressão: o relatório antigo agrupava boleto com crédito e pagava 3%."""
         quote = self._sold_with_commission(
             "V-BOL1", payment_type=PaymentMethodType.BOLETO, payment_installments=1,
         )
-        self.assertEqual(quote.commission_pct, Decimal("4.00"))
+        self.assertEqual(quote.commission_pct, Decimal("3.00"))
 
     def test_credit_card_up_to_6x_pays_3_percent(self):
         quote = self._sold_with_commission(
@@ -183,7 +183,7 @@ class CommissionReportTests(ReportTestBase):
 
         self.assertEqual(resp.status_code, 200)
         # 3% de 1000 + 4% de 1000
-        self.assertEqual(resp.context["total_commission"], Decimal("70.00"))
+        self.assertEqual(resp.context["total_commission"], Decimal("60.00"))
         self.assertEqual(resp.context["sales_count"], 2)
         self.assertEqual(resp.context["pending_count"], 0)
 
@@ -505,13 +505,86 @@ class CsvExportTests(ReportTestBase):
         self.assertTrue(body.startswith("Número;Data;Cliente;Vendedor;Desconto %;Total R$"))
 
 
+class NewCommissionAndReportTests(ReportTestBase):
+    def setUp(self):
+        super().setUp()
+        self._tariff(PaymentMethodType.CREDIT_CARD, 12, "13.30")
+
+    def test_fixed_commission_is_reduced_by_freight_deduction(self):
+        quote = self._sale(
+            "V-FIXED", items=[("Mesa", 1, "10000.00")],
+            payment_type=PaymentMethodType.CREDIT_CARD,
+            payment_installments=12,
+            discount_percent=Decimal("10.0"),
+            freight_commission_deduction=Decimal("50.00"),
+        )
+        persist_quote_commission(quote)
+        quote.refresh_from_db()
+
+        self.assertEqual(quote.commission_pct, Decimal("3.00"))
+        self.assertEqual(quote.commission_gross_value, Decimal("270.00"))
+        self.assertEqual(quote.commission_value, Decimal("220.00"))
+
+    def test_freight_report_lists_only_commission_deductions(self):
+        quote = self._sale(
+            "V-FREIGHT", items=[("Mesa", 1, "1000.00")],
+            freight_commission_deduction=Decimal("75.00"),
+        )
+        response = self.client.get(reverse("core:report_freights"), self._period_qs())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(response.context["quotes"]), [quote])
+        self.assertEqual(response.context["total_freight_deduction"], Decimal("75.00"))
+
+    def test_card_report_emits_one_row_for_each_card_leg(self):
+        quote = self._sale(
+            "V-CARD-SPLIT", items=[("Mesa", 1, "1000.00")],
+            payment_type=PaymentMethodType.CREDIT_CARD,
+            payment_installments=6,
+            payment_fee_percent=Decimal("3.00"),
+            payment_type_2=PaymentMethodType.CREDIT_CARD,
+            payment_installments_2=12,
+            payment_fee_percent_2=Decimal("13.30"),
+            payment_split_amount=Decimal("300.00"),
+        )
+        response = self.client.get(reverse("core:report_card_sales"), self._period_qs())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["count"], 2)
+        self.assertEqual(response.context["total_card"], quote.total_value_snapshot)
+
+    def test_ifood_award_uses_highest_monthly_tier(self):
+        self._sale("V-IFOOD", items=[("Mesa", 1, "150000.00")])
+        response = self.client.get(reverse("core:goals_list"))
+
+        award = response.context["ifood_awards"][0]
+        self.assertEqual(award["prize"], Decimal("1000"))
+
+    def test_goal_creation_accepts_brazilian_currency(self):
+        response = self.client.post(
+            reverse("core:goal_create"),
+            {
+                "goal_type": "COLLECTIVE",
+                "period": "MONTHLY",
+                "target_value": "100.000,50",
+                "target_quantity": "0",
+                "period_start": self.today.isoformat(),
+                "period_end": self.today.isoformat(),
+            },
+        )
+
+        self.assertRedirects(response, reverse("core:goals_list"))
+        self.assertEqual(SalesGoal.objects.get().target_value, Decimal("100000.50"))
+
+
 class ReportAccessTests(ReportTestBase):
     def test_seller_cannot_open_reports(self):
         self.client.logout()
         self.client.login(username="vendedor", password="x")
         for name in (
             "core:reports_hub", "core:report_sales", "core:report_commissions",
-            "core:report_discounts", "core:report_products", "core:report_csv_export",
+            "core:report_discounts", "core:report_products", "core:report_freights",
+            "core:report_card_sales", "core:report_csv_export",
         ):
             with self.subTest(view=name):
                 resp = self.client.get(reverse(name))

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections import defaultdict
 from datetime import date as date_type, timedelta
 from decimal import Decimal
@@ -1213,6 +1214,8 @@ def report_commissions(request):
         lambda: {
             "seller_name": "",
             "total_sold": Decimal("0"),
+            "commission_gross": Decimal("0"),
+            "freight_deduction": Decimal("0"),
             "commission": Decimal("0"),
             "count": 0,
             "disc_sum": Decimal("0"),
@@ -1224,6 +1227,8 @@ def report_commissions(request):
     estimated_count = 0      # comissão estimada retroativamente (BACKFILL)
     finance_count = 0        # vendas cujo responsável é do financeiro
     total_commission = Decimal("0")
+    total_commission_gross = Decimal("0")
+    total_freight_deduction = Decimal("0")
     total_sold_period = Decimal("0")
 
     for q in qs:
@@ -1256,15 +1261,24 @@ def report_commissions(request):
         # Divide pelo total de participantes, não só pelos que recebem: a parte
         # do financeiro evapora em vez de engordar a do vendedor.
         shares = Decimal(len(recipients))
+        gross_commission = q.commission_gross_value
+        if gross_commission is None:
+            # Antes da regra fixa, commission_value era o único valor congelado.
+            gross_commission = q.commission_value
+        freight_deduction = q.freight_commission_deduction or Decimal("0")
 
         for uid, uname, _role in earners:
             bucket = seller_totals[uid]
             bucket["seller_name"] = uname
             bucket["total_sold"] += value / shares
+            bucket["commission_gross"] += gross_commission / shares
+            bucket["freight_deduction"] += freight_deduction / shares
             bucket["commission"] += q.commission_value / shares
             bucket["count"] += 1
             bucket["disc_sum"] += discount
             total_commission += q.commission_value / shares
+            total_commission_gross += gross_commission / shares
+            total_freight_deduction += freight_deduction / shares
 
     commissions = []
     for _uid, data in sorted(seller_totals.items(), key=lambda kv: -kv[1]["total_sold"]):
@@ -1279,6 +1293,8 @@ def report_commissions(request):
             # Razão comissão/faturamento do vendedor. Não é o % do motor: aquele
             # incide só sobre produtos, este é sobre o faturamento (com frete).
             "comm_pct": round(est_commission / total_sold * 100, 1) if total_sold else Decimal("0"),
+            "gross_commission": data["commission_gross"].quantize(Decimal("0.01")),
+            "freight_deduction": data["freight_deduction"].quantize(Decimal("0.01")),
             "est_commission": est_commission.quantize(Decimal("0.01")),
         })
 
@@ -1289,7 +1305,70 @@ def report_commissions(request):
         "estimated_count": estimated_count,
         "finance_count": finance_count,
         "total_commission": total_commission.quantize(Decimal("0.01")),
+        "total_commission_gross": total_commission_gross.quantize(Decimal("0.01")),
+        "total_freight_deduction": total_freight_deduction.quantize(Decimal("0.01")),
         "total_sold_period": total_sold_period.quantize(Decimal("0.01")),
+        **_period_context(request, date_from, date_to),
+    })
+
+
+@login_required
+def report_freights(request):
+    if not _is_admin_user(request.user):
+        messages.error(request, "Acesso negado.")
+        return redirect("core:index")
+    date_from, date_to = _report_period(request)
+    quotes = (
+        Quote.objects.sold()
+        .filter(sold_on__gte=date_from, sold_on__lte=date_to, freight_commission_deduction__gt=0)
+        .select_related("seller", "customer")
+        .order_by("-sold_on", "-id")
+    )
+    total = quotes.aggregate(total=Sum("freight_commission_deduction"))["total"] or Decimal("0")
+    return render(request, "core/report_freights.html", {
+        "quotes": quotes,
+        "total_freight_deduction": total.quantize(Decimal("0.01")),
+        "count": quotes.count(),
+        **_period_context(request, date_from, date_to),
+    })
+
+
+@login_required
+def report_card_sales(request):
+    if not _is_admin_user(request.user):
+        messages.error(request, "Acesso negado.")
+        return redirect("core:index")
+    date_from, date_to = _report_period(request)
+    quotes = (
+        Quote.objects.sold()
+        .filter(sold_on__gte=date_from, sold_on__lte=date_to)
+        .select_related("seller", "customer")
+        .order_by("-sold_on", "-id")
+    )
+    rows = []
+    total_card = Decimal("0")
+    for quote in quotes:
+        total = quote.total_value_snapshot or Decimal("0")
+        split = quote.payment_type_2 and quote.payment_split_amount is not None
+        if quote.payment_type == "CREDIT_CARD":
+            amount = (
+                min(quote.payment_split_amount, total)
+                if split else max(Decimal("0"), total - (quote.down_payment_value or Decimal("0")))
+            )
+            rows.append({"quote": quote, "leg": "Pagamento", "amount": amount,
+                         "installments": quote.payment_installments or 1,
+                         "fee_percent": quote.payment_fee_percent or Decimal("0")})
+            total_card += amount
+        if split and quote.payment_type_2 == "CREDIT_CARD":
+            amount = max(Decimal("0"), total - quote.payment_split_amount)
+            rows.append({"quote": quote, "leg": "Restante", "amount": amount,
+                         "installments": quote.payment_installments_2 or 1,
+                         "fee_percent": quote.payment_fee_percent_2 or Decimal("0")})
+            total_card += amount
+    return render(request, "core/report_card_sales.html", {
+        "sales": rows,
+        "total_card": total_card.quantize(Decimal("0.01")),
+        "count": len(rows),
         **_period_context(request, date_from, date_to),
     })
 
@@ -1467,11 +1546,52 @@ def goals_list(request):
         goals = SalesGoal.objects.filter(Q(seller=user) | Q(goal_type=GoalType.COLLECTIVE))
 
     sellers = User.objects.filter(is_active=True, role=Role.SELLER).order_by("username")
+    cycle_start, cycle_end = _month_bounds(timezone.localdate())
+    if is_admin:
+        award_sellers = sellers
+    elif user.role == Role.SELLER:
+        award_sellers = User.objects.filter(pk=user.pk)
+    else:
+        award_sellers = User.objects.none()
+    award_tiers = (
+        (Decimal("350000"), Decimal("3000")),
+        (Decimal("300000"), Decimal("2500")),
+        (Decimal("250000"), Decimal("2000")),
+        (Decimal("200000"), Decimal("1500")),
+        (Decimal("150000"), Decimal("1000")),
+        (Decimal("100000"), Decimal("500")),
+    )
+    if award_sellers:
+        totals = {
+            row["seller_id"]: row["total"] or Decimal("0")
+            for row in (
+                Quote.objects.sold()
+                .filter(sold_on__gte=cycle_start, sold_on__lte=cycle_end, seller__in=award_sellers)
+                .values("seller_id").annotate(total=Sum("total_value_snapshot"))
+            )
+        }
+    else:
+        totals = {}
+    ifood_awards = []
+    for seller in award_sellers:
+        total = totals.get(seller.id, Decimal("0"))
+        reached = next(((target, prize) for target, prize in award_tiers if total >= target), None)
+        next_tier = next(((target, prize) for target, prize in reversed(award_tiers) if total < target), None)
+        ifood_awards.append({
+            "seller": seller,
+            "total": total,
+            "prize": reached[1] if reached else Decimal("0"),
+            "target": reached[0] if reached else Decimal("0"),
+            "next_target": next_tier[0] if next_tier else None,
+        })
 
     return render(request, "core/goals_list.html", {
         "goals": goals,
         "is_admin": is_admin,
         "sellers": sellers,
+        "ifood_awards": ifood_awards,
+        "ifood_cycle_start": cycle_start,
+        "ifood_cycle_end": cycle_end,
     })
 
 
@@ -1488,7 +1608,16 @@ def goal_create(request):
     seller_id = request.POST.get("seller_id") or None
 
     try:
-        target_value = Decimal(request.POST.get("target_value", "0") or "0")
+        raw_target_value = (request.POST.get("target_value", "0") or "0").strip()
+        # O JavaScript envia formato técnico, mas o servidor também aceita a
+        # digitação brasileira para manter o dado financeiro correto em qualquer
+        # navegador, automação ou integração.
+        if "," in raw_target_value:
+            raw_target_value = raw_target_value.replace(".", "").replace(",", ".")
+        elif re.fullmatch(r"\d{1,3}(\.\d{3})+", raw_target_value):
+            # "2.300" sem centavos é milhar em pt-BR, nunca 2,30.
+            raw_target_value = raw_target_value.replace(".", "")
+        target_value = Decimal(raw_target_value)
         target_quantity = int(request.POST.get("target_quantity", "0") or "0")
     except (ValueError, ArithmeticError):
         messages.error(request, "Valores de meta inválidos.")
