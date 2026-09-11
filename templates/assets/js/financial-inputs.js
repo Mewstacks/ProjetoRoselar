@@ -97,6 +97,11 @@
     });
   }, true);
 
+  // Voltar pelo botao "voltar" restaura a pagina com o valor tecnico que o
+  // envio deixou no campo ("7900.00"). Reformatar na volta evita que o
+  // vendedor encare um numero com ponto decimal — ou o reenvie assim.
+  window.addEventListener('pageshow', function () { initialise(document); });
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', function () { initialise(document); });
   } else {

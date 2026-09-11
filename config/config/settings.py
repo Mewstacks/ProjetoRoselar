@@ -228,9 +228,16 @@ CSRF_COOKIE_SECURE = not DEBUG
 SESSION_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_SAMESITE = 'Lax'
 
-# Make CSRF cookie a browser-session cookie (cleared on browser close)
-# Prevents stale persistent cookies from causing CSRF failures.
-CSRF_COOKIE_AGE = None
+# O cookie CSRF precisa sobreviver ao fechamento do navegador. Com
+# CSRF_COOKIE_AGE = None ele vira cookie de sessao: o celular reinicia o
+# Chrome, a aba volta do cache com o token antigo no HTML, o cookie nao existe
+# mais e o POST do formulario morre em CSRF. A propria doc do Django avisa:
+# "The reason for setting a long-lived expiration time is to avoid problems in
+# the case of a user closing a browser or bookmarking a page and then loading
+# that page from a browser cache. Without persistent cookies, the form
+# submission would fail in this case."
+# https://docs.djangoproject.com/en/5.1/ref/settings/#csrf-cookie-age
+CSRF_COOKIE_AGE = 60 * 60 * 24 * 365
 
 # Hardening de cabeçalhos — só em produção (HTTPS via Railway)
 if _IS_PRODUCTION:

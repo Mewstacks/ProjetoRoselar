@@ -1689,6 +1689,155 @@
         });
       });
 
+      // ── Destrava o formulario quando a pagina volta do cache ──────────
+      // O navegador restaura a aba com os botoes desabilitados e o latch
+      // ligado; sem isto o clique em "Salvar e Avancar" nao faz nada e nao
+      // avisa nada. So um recarregamento completo (sair e logar) devolvia o
+      // formulario — e ai o que estava digitado ja tinha sumido.
+      function releaseQuoteForm() {
+        quoteFormSubmitting = false;
+        quoteForm.querySelectorAll('button[type="submit"]').forEach(button => {
+          button.disabled = false;
+          button.removeAttribute('aria-busy');
+        });
+      }
+      window.addEventListener('pageshow', function (event) {
+        if (event.persisted) releaseQuoteForm();
+      });
+
+      // Rede de seguranca para o caso em que o POST sai e nada volta (queda de
+      // rede, servidor dormindo). Sem isto o formulario fica travado de vez.
+      quoteForm.addEventListener('submit', function () {
+        if (!quoteFormSubmitting) return;
+        window.setTimeout(function () {
+          if (!quoteFormSubmitting) return;
+          releaseQuoteForm();
+          showFormWarning('O envio não respondeu. Confira a conexão e tente salvar de novo — o que você digitou continua aqui.');
+        }, 20000);
+      });
+
+      // ── Rascunho local: nada do que foi digitado se perde ─────────────
+      // Sessao expirada, token CSRF vencido, aba descartada pelo celular ou
+      // rede caindo derrubavam o POST e devolviam um formulario vazio. O
+      // rascunho fica no proprio aparelho e volta a ser oferecido na carga.
+      (function quoteDraft() {
+        const KEY = 'roselar.rascunho.orcamento:' + window.location.pathname;
+        const MAX_AGE = 12 * 60 * 60 * 1000;
+        let saveTimer = null;
+
+        function storable(el) {
+          return el.name
+            && el.type !== 'file'
+            && el.type !== 'submit'
+            && el.type !== 'button'
+            && el.name !== 'csrfmiddlewaretoken'
+            && el.name !== 'submission_token';
+        }
+
+        function snapshot() {
+          const data = {};
+          Array.from(quoteForm.elements).forEach(el => {
+            if (!storable(el)) return;
+            if (el.type === 'checkbox') { data[el.name] = el.checked; return; }
+            if (el.type === 'radio') { if (el.checked) data[el.name] = el.value; return; }
+            data[el.name] = el.value;
+          });
+          return data;
+        }
+
+        function isEmptyDraft(data) {
+          return !Object.keys(data).some(name =>
+            /-(product_name|unit_value|quantity)$/.test(name) && String(data[name] || '').trim()
+          );
+        }
+
+        function write() {
+          try {
+            const data = snapshot();
+            if (isEmptyDraft(data)) { clear(); return; }
+            localStorage.setItem(KEY, JSON.stringify({ t: Date.now(), data: data }));
+          } catch (err) {
+            // Cota cheia ou armazenamento bloqueado: o rascunho e um extra.
+          }
+        }
+
+        function clear() {
+          try { localStorage.removeItem(KEY); } catch (err) {}
+        }
+
+        function read() {
+          try {
+            const raw = localStorage.getItem(KEY);
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            if (!parsed || !parsed.data || (Date.now() - parsed.t) > MAX_AGE) { clear(); return null; }
+            return parsed;
+          } catch (err) { return null; }
+        }
+
+        function apply(data) {
+          const totalForms = document.querySelector('input[name$="-TOTAL_FORMS"]');
+          const wanted = parseInt(data[totalForms ? totalForms.name : ''], 10);
+          if (totalForms && !isNaN(wanted)) {
+            let guard = 0;
+            while (parseInt(totalForms.value, 10) < wanted && guard++ < 80) addFormRow();
+          }
+          Object.keys(data).forEach(name => {
+            const nodes = quoteForm.querySelectorAll('[name="' + name.replace(/"/g, '\\"') + '"]');
+            if (!nodes.length) return;
+            const value = data[name];
+            nodes.forEach(el => {
+              if (el.type === 'radio') { el.checked = (el.value === value); return; }
+              if (el.type === 'checkbox') { el.checked = !!value; return; }
+              el.value = value == null ? '' : value;
+            });
+            if (nodes[0].tagName === 'SELECT' || nodes[0].type === 'checkbox' || nodes[0].type === 'radio') {
+              nodes.forEach(el => el.dispatchEvent(new Event('change', { bubbles: true })));
+            }
+          });
+        }
+
+        function offer(draft) {
+          const bar = document.createElement('div');
+          bar.className = 'alert alert-warning d-flex flex-wrap align-items-center gap-2 mb-3';
+          bar.setAttribute('role', 'status');
+          const when = new Date(draft.t).toLocaleString('pt-BR', {
+            day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
+          });
+          const text = document.createElement('span');
+          text.className = 'flex-grow-1';
+          text.textContent = 'Rascunho não enviado de ' + when + '.';
+          const restore = document.createElement('button');
+          restore.type = 'button';
+          restore.className = 'btn-a primary';
+          restore.textContent = 'Restaurar';
+          const drop = document.createElement('button');
+          drop.type = 'button';
+          drop.className = 'btn-a outline';
+          drop.textContent = 'Descartar';
+          bar.append(text, restore, drop);
+          quoteForm.insertBefore(bar, quoteForm.firstChild);
+          restore.addEventListener('click', function () {
+            apply(draft.data);
+            bar.remove();
+          });
+          drop.addEventListener('click', function () {
+            clear();
+            bar.remove();
+          });
+        }
+
+        ['input', 'change'].forEach(evt => {
+          quoteForm.addEventListener(evt, function () {
+            window.clearTimeout(saveTimer);
+            saveTimer = window.setTimeout(write, 600);
+          });
+        });
+
+        const pending = read();
+        if (pending) offer(pending);
+      })();
+
       // ── On page load: highlight fields with server-side errors + scroll ──
       (function() {
         // Add is-invalid class to any input/select/textarea that has a .text-danger sibling

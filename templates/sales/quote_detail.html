@@ -1027,5 +1027,18 @@
       });
     })();
   </script>
+<script>
+  // O orcamento chegou ao servidor: o rascunho local desta tela ja cumpriu o
+  // papel e nao deve ser oferecido de volta na proxima abertura do formulario.
+  (function () {
+    try {
+      ['{% url "sales:quote_create" %}', '{% url "sales:quote_edit" quote.id %}']
+        .forEach(function (path) {
+          localStorage.removeItem('roselar.rascunho.orcamento:' + path);
+        });
+    } catch (err) {}
+  })();
+</script>
 </body>
+
 </html>

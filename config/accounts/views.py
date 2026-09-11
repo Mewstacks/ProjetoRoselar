@@ -55,8 +55,11 @@ def login(request):
             clear_attempts("login", rl_ident)
             remember = request.POST.get('remember')
             if not remember:
-                # Session expires when the browser closes
-                request.session.set_expiry(0)
+                # 12h em vez de "ate fechar o navegador": no celular o Chrome
+                # reinicia sozinho, descarta o cookie de sessao e derruba o
+                # vendedor no meio de um orcamento — o POST cai no login e o
+                # que ele digitou some. 12h cobre o dia de trabalho.
+                request.session.set_expiry(60 * 60 * 12)
             else:
                 # Session lasts 30 days
                 request.session.set_expiry(60 * 60 * 24 * 30)
