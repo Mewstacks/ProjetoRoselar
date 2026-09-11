@@ -681,6 +681,22 @@ def quote_create(request: HttpRequest) -> HttpResponse:
         },
     )
 
+_EDIT_TOKEN_SESSION_KEY = "quote_edit_tokens"
+_EDIT_TOKEN_HISTORY = 20
+
+
+def _edit_token_already_used(request: HttpRequest, quote_id: int, token: str) -> bool:
+    return f"{quote_id}:{token}" in request.session.get(_EDIT_TOKEN_SESSION_KEY, [])
+
+
+def _mark_edit_token_used(request: HttpRequest, quote_id: int, token: str) -> None:
+    used = list(request.session.get(_EDIT_TOKEN_SESSION_KEY, []))
+    used.append(f"{quote_id}:{token}")
+    # A sessão não pode crescer sem fim: só os últimos envios importam.
+    request.session[_EDIT_TOKEN_SESSION_KEY] = used[-_EDIT_TOKEN_HISTORY:]
+    request.session.modified = True
+
+
 @login_required
 @require_http_methods(["GET", "POST"])
 def quote_edit(request: HttpRequest, quote_id: int) -> HttpResponse:
@@ -689,7 +705,22 @@ def quote_edit(request: HttpRequest, quote_id: int) -> HttpResponse:
         messages.error(request, "Acesso negado.")
         return redirect("sales:quote_list")
 
+    # O mesmo formulário de edição pode chegar duas vezes (clique duplo, aba
+    # restaurada que reenvia, rede que repete o POST). O token marca o envio
+    # como já consumido, então o segundo não regrava o orçamento nem duplica
+    # pedidos, comissão e histórico.
+    edit_token = request.POST.get("submission_token", "") if request.method == "POST" else ""
+
     if request.method == "POST":
+        if edit_token and _edit_token_already_used(request, quote.id, edit_token):
+            messages.info(
+                request,
+                f"O envio repetido foi ignorado; o orçamento {quote.number} já foi atualizado.",
+            )
+            if request.POST.get("action", "save") == "next_step":
+                return redirect("sales:quote_simulate", quote_id=quote.id)
+            return redirect("sales:quote_detail", quote_id=quote.id)
+
         # Retrato ANTES de ligar o formulário: `form.is_valid()` roda
         # `_post_clean`, que já escreve os dados novos na instância — um retrato
         # tirado depois compararia o orçamento com ele mesmo.
@@ -739,8 +770,11 @@ def quote_edit(request: HttpRequest, quote_id: int) -> HttpResponse:
                 ip_address=request.META.get('REMOTE_ADDR'),
             )
 
+            if edit_token:
+                _mark_edit_token_used(request, quote.id, edit_token)
+
             messages.success(request, f"Orçamento {quote.number} atualizado.")
-            
+
             action = request.POST.get('action', 'save')
             if action == 'next_step':
                 return redirect("sales:quote_simulate", quote_id=quote.id)
@@ -755,7 +789,12 @@ def quote_edit(request: HttpRequest, quote_id: int) -> HttpResponse:
     return render(
         request,
         "sales/quote_form.html",
-        {"form": form, "formset": formset, "quote": quote},
+        {
+            "form": form,
+            "formset": formset,
+            "quote": quote,
+            "submission_token": uuid4(),
+        },
     )
 
 @login_required
@@ -3121,9 +3160,15 @@ def quote_simulate_commission(request: HttpRequest, quote_id: int) -> HttpRespon
         except Exception:
             down_payment_value = None
         def _optional_decimal(name):
-            raw = (request.POST.get(name, '') or '').strip().replace(',', '.')
+            # "1.250,50" chegava aqui e virava Decimal invalido -> None -> zero
+            # silencioso em cima de um valor de comissao. O parser do forms.py e
+            # o mesmo que o resto da tela usa.
+            from sales.forms import parse_brl_decimal
+            raw = (request.POST.get(name, '') or '').strip()
+            if not raw:
+                return None
             try:
-                return Decimal(raw) if raw else None
+                return parse_brl_decimal(raw, name)
             except Exception:
                 return None
         freight_commission_deduction = _optional_decimal('freight_commission_deduction') or Decimal('0')

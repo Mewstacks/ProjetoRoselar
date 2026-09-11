@@ -118,6 +118,60 @@ class QuoteSubmissionRegressionTests(TestCase):
         self.assertEqual(quote.discount_percent, Decimal("90.0"))
 
 
+    def test_repeated_edit_submission_is_ignored(self):
+        """Segundo envio da mesma tela de edição não regrava o orçamento."""
+        self.client.post(reverse("sales:quote_create"), self._payload(uuid4(), "7900.00"))
+        quote = Quote.objects.get()
+        item_id = quote.items.get().id
+
+        token = uuid4()
+        edit_payload = self._payload(token, "7900.00")
+        edit_payload.update({
+            "discount_percent": "10",
+            "items-INITIAL_FORMS": "1",
+            "items-0-id": item_id,
+        })
+        first = self.client.post(reverse("sales:quote_edit", args=[quote.id]), edit_payload)
+        self.assertEqual(first.status_code, 302)
+        quote.refresh_from_db()
+        self.assertEqual(quote.discount_percent, Decimal("10.0"))
+
+        # Mesmo token, dados diferentes: é o mesmo envio chegando de novo.
+        repeat = dict(edit_payload, discount_percent="25")
+        second = self.client.post(reverse("sales:quote_edit", args=[quote.id]), repeat)
+
+        self.assertEqual(second.status_code, 302)
+        quote.refresh_from_db()
+        self.assertEqual(quote.discount_percent, Decimal("10.0"))
+
+    def test_edit_page_renders_a_submission_token(self):
+        self.client.post(reverse("sales:quote_create"), self._payload(uuid4(), "7900.00"))
+        quote = Quote.objects.get()
+
+        response = self.client.get(reverse("sales:quote_edit", args=[quote.id]))
+
+        self.assertEqual(response.status_code, 200)
+        token = response.context["submission_token"]
+        self.assertContains(response, f'name="submission_token" value="{token}"')
+
+    def test_server_accepts_brazilian_money_format(self):
+        """O servidor é a autoridade sobre o formato: "7.900,00" tem de entrar
+        como 7900.00 mesmo que nenhum JavaScript rode no navegador."""
+        payload = self._payload(uuid4(), "7.900,00")
+        payload["freight_responsible"] = "STORE"
+        payload["freight_value"] = "1.250,50"
+        payload["delivery_days_min"] = "15"
+        payload["total_override"] = "9.999,90"
+
+        response = self.client.post(reverse("sales:quote_create"), payload)
+
+        self.assertEqual(response.status_code, 302)
+        quote = Quote.objects.get()
+        self.assertEqual(quote.items.get().unit_value, Decimal("7900.00"))
+        self.assertEqual(quote.freight_value, Decimal("1250.50"))
+        self.assertEqual(quote.total_override, Decimal("9999.90"))
+
+
 class StandaloneOrderTests(TestCase):
     """Pedido avulso da loja: compra de estoque sem orçamento/vendedor."""
 

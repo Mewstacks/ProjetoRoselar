@@ -325,5 +325,14 @@
     <script src="{% static 'assets/js/theme.js' %}"></script>
     <script src="https://cdn.jsdelivr.net/npm/flowbite@2.5.2/dist/flowbite.min.js"></script>
     <link rel="stylesheet" href="https://unicons.iconscout.com/release/v4.0.0/css/line.css">
-  </body>
+  <script>
+  // O evento chegou ao servidor: o rascunho local ja cumpriu o papel.
+  (function () {
+    try {
+      localStorage.removeItem('roselar.rascunho.evento:' + '{% url "calendar_app:create_event" %}');
+    } catch (err) {}
+  })();
+</script>
+</body>
+
 </html>

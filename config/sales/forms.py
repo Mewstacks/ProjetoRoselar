@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django import forms
 from django.forms import inlineformset_factory
 from django.utils import timezone
@@ -36,6 +38,21 @@ def parse_brl_decimal(raw, field_label="valor"):
         raise forms.ValidationError(f"{field_label.capitalize()} inválido.")
 
 
+def parse_brl_percent(raw, field_label="porcentagem"):
+    """Converte "12,5" ou "12.5" para Decimal. Vazio devolve None.
+
+    Porcentagem não tem separador de milhar, então a vírgula é sempre decimal.
+    """
+    from decimal import Decimal, InvalidOperation
+    if raw is None or str(raw).strip() == "":
+        return None
+    raw = str(raw).strip().replace("%", "").replace(",", ".")
+    try:
+        return Decimal(raw)
+    except InvalidOperation:
+        raise forms.ValidationError(f"{field_label.capitalize()} inválida.")
+
+
 class QuoteForm(forms.ModelForm):
     # Add payment_type as a choice field
     payment_type = forms.ChoiceField(
@@ -55,6 +72,27 @@ class QuoteForm(forms.ModelForm):
         }),
         label="Preço Final ao Cliente (R$)",
     )
+
+    # O frete é digitado em reais como qualquer outro valor da tela. Como
+    # DecimalField do modelo ele recusava "1.250,50" e o envio voltava com erro
+    # em um campo que o vendedor tinha preenchido certo.
+    freight_value = forms.CharField(
+        required=False,
+        widget=forms.TextInput(attrs={
+            "class": "form-control", "inputmode": "numeric", "placeholder": "0,00",
+            "data-financial": "money",
+        }),
+        label="Valor do Frete (R$)",
+    )
+
+    def clean_freight_value(self):
+        raw = self.cleaned_data.get('freight_value', '')
+        if raw is None or str(raw).strip() == '':
+            return Decimal("0.00")
+        val = parse_brl_decimal(raw, 'valor do frete')
+        if val < 0:
+            raise forms.ValidationError('O valor do frete não pode ser negativo.')
+        return val
 
     def clean_total_override(self):
         raw = self.cleaned_data.get('total_override', '')
@@ -211,7 +249,9 @@ class QuoteForm(forms.ModelForm):
 
 class QuoteItemForm(forms.ModelForm):
     # Make architect_percent not required and hidden by default
-    architect_percent = forms.DecimalField(
+    # CharField + parser proprio: o vendedor digita "12,5" e o DecimalField do
+    # Django recusaria a virgula antes de qualquer clean rodar.
+    architect_percent = forms.CharField(
         required=False,
         widget=forms.TextInput(attrs={
             'class': 'form-control',
@@ -221,6 +261,14 @@ class QuoteItemForm(forms.ModelForm):
         }),
         label="% Arquiteto"
     )
+
+    def clean_architect_percent(self):
+        val = parse_brl_percent(self.cleaned_data.get('architect_percent', ''), '% do arquiteto')
+        if val is None:
+            return None
+        if val < 0:
+            raise forms.ValidationError('A porcentagem do arquiteto não pode ser negativa.')
+        return val
     
     # Override unit_value as CharField to accept Brazilian currency format
     unit_value = forms.CharField(

@@ -171,6 +171,11 @@ STORAGES = {
         "BACKEND": "django.core.files.storage.FileSystemStorage",
     },
     "staticfiles": {
+        # Sem manifest de proposito: o WhiteNoise serve estes arquivos com
+        # Cache-Control de 60s, entao um deploy chega ao navegador em um minuto
+        # sem hash no nome. Trocar por CompressedManifestStaticFilesStorage faz
+        # qualquer {% static %} de arquivo ausente derrubar a pagina inteira
+        # em 500 — caro demais para o ganho.
         "BACKEND": "whitenoise.storage.CompressedStaticFilesStorage",
     },
 }

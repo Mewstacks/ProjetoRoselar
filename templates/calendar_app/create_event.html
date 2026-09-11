@@ -166,7 +166,7 @@
               </div>
               {% endif %}
 
-              <form method="post">
+              <form method="post" data-draft="evento" data-draft-requires="title">
                 {% csrf_token %}
 
                 <div style="margin-bottom:1rem;">
@@ -292,5 +292,6 @@
         else daysInput.value = '';
       });
     </script>
-  </body>
+  <script src="{% static 'assets/js/form-draft.js' %}"></script>
+</body>
 </html>

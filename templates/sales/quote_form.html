@@ -255,7 +255,10 @@
           </div>
 
           <!-- ═══ FORM ═══ -->
-          <form method="post" id="quote-form" enctype="multipart/form-data">
+          <form method="post" id="quote-form" enctype="multipart/form-data"
+                  data-draft="orcamento"
+                  data-draft-requires="-product_name,-unit_value,-quantity"
+                  data-draft-add-row="addFormRow">
             {% csrf_token %}
             {% if submission_token %}
               <input type="hidden" name="submission_token" value="{{ submission_token }}">
@@ -765,6 +768,7 @@
     <script src="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.js"></script>
     <script src="{% static 'assets/js/theme.js' %}"></script>
     <script src="{% static 'assets/js/financial-inputs.js' %}"></script>
+    <script src="{% static 'assets/js/form-draft.js' %}"></script>
     <script src="https://cdn.jsdelivr.net/npm/flowbite@2.5.2/dist/flowbite.min.js"></script>
 
     <script>
@@ -1528,14 +1532,6 @@
         document.getElementById('form-warnings').classList.add('d-none');
       }
 
-      // Converte apenas valores ainda no formato visual BR. Se a rotina rodar
-      // novamente sobre "7900.00", o valor permanece 7900.00 (e não 790000).
-      function normalizeCurrencyForSubmit(value) {
-        const normalized = String(value || '').trim();
-        if (!normalized.includes(',')) return normalized;
-        return normalized.replace(/\./g, '').replace(',', '.');
-      }
-
       // ── Form validation: required fields + auto-delete blank items ────
       const quoteForm = document.getElementById('quote-form');
       let quoteFormSubmitting = false;
@@ -1652,25 +1648,9 @@
           }
         }
 
-        // ── All validation passed — now convert values for submission ──
-        rows.forEach(row => {
-          const delCb = row.querySelector('input[type="checkbox"][name$="-DELETE"]');
-          if (delCb && delCb.checked) return;
-          if (row.style.display === 'none') return;
-          row.querySelectorAll(
-            'input[name$="-unit_value"], input[name$="-unit_value_wholesale"]'
-          ).forEach(input => {
-            if (input.value) input.value = normalizeCurrencyForSubmit(input.value);
-          });
-        });
-
-        // Converte os demais campos monetários sem alterar um valor que já
-        // tenha sido normalizado por um envio anterior.
-        quoteForm.querySelectorAll(
-          'input[name="freight_value"], input[name="total_override"], input[name="total_cash_override"]'
-        ).forEach(input => {
-          if (input.value) input.value = normalizeCurrencyForSubmit(input.value);
-        });
+        // Os campos monetários já saem daqui no formato técnico: o
+        // financial-inputs.js manda um hidden de mesmo nome e tira o campo
+        // visível do envio, sem reescrever o que o vendedor está vendo.
 
         // Preserva qual dos dois botões foi usado antes de desabilitá-los.
         const submitter = e.submitter;
@@ -1715,128 +1695,6 @@
           showFormWarning('O envio não respondeu. Confira a conexão e tente salvar de novo — o que você digitou continua aqui.');
         }, 20000);
       });
-
-      // ── Rascunho local: nada do que foi digitado se perde ─────────────
-      // Sessao expirada, token CSRF vencido, aba descartada pelo celular ou
-      // rede caindo derrubavam o POST e devolviam um formulario vazio. O
-      // rascunho fica no proprio aparelho e volta a ser oferecido na carga.
-      (function quoteDraft() {
-        const KEY = 'roselar.rascunho.orcamento:' + window.location.pathname;
-        const MAX_AGE = 12 * 60 * 60 * 1000;
-        let saveTimer = null;
-
-        function storable(el) {
-          return el.name
-            && el.type !== 'file'
-            && el.type !== 'submit'
-            && el.type !== 'button'
-            && el.name !== 'csrfmiddlewaretoken'
-            && el.name !== 'submission_token';
-        }
-
-        function snapshot() {
-          const data = {};
-          Array.from(quoteForm.elements).forEach(el => {
-            if (!storable(el)) return;
-            if (el.type === 'checkbox') { data[el.name] = el.checked; return; }
-            if (el.type === 'radio') { if (el.checked) data[el.name] = el.value; return; }
-            data[el.name] = el.value;
-          });
-          return data;
-        }
-
-        function isEmptyDraft(data) {
-          return !Object.keys(data).some(name =>
-            /-(product_name|unit_value|quantity)$/.test(name) && String(data[name] || '').trim()
-          );
-        }
-
-        function write() {
-          try {
-            const data = snapshot();
-            if (isEmptyDraft(data)) { clear(); return; }
-            localStorage.setItem(KEY, JSON.stringify({ t: Date.now(), data: data }));
-          } catch (err) {
-            // Cota cheia ou armazenamento bloqueado: o rascunho e um extra.
-          }
-        }
-
-        function clear() {
-          try { localStorage.removeItem(KEY); } catch (err) {}
-        }
-
-        function read() {
-          try {
-            const raw = localStorage.getItem(KEY);
-            if (!raw) return null;
-            const parsed = JSON.parse(raw);
-            if (!parsed || !parsed.data || (Date.now() - parsed.t) > MAX_AGE) { clear(); return null; }
-            return parsed;
-          } catch (err) { return null; }
-        }
-
-        function apply(data) {
-          const totalForms = document.querySelector('input[name$="-TOTAL_FORMS"]');
-          const wanted = parseInt(data[totalForms ? totalForms.name : ''], 10);
-          if (totalForms && !isNaN(wanted)) {
-            let guard = 0;
-            while (parseInt(totalForms.value, 10) < wanted && guard++ < 80) addFormRow();
-          }
-          Object.keys(data).forEach(name => {
-            const nodes = quoteForm.querySelectorAll('[name="' + name.replace(/"/g, '\\"') + '"]');
-            if (!nodes.length) return;
-            const value = data[name];
-            nodes.forEach(el => {
-              if (el.type === 'radio') { el.checked = (el.value === value); return; }
-              if (el.type === 'checkbox') { el.checked = !!value; return; }
-              el.value = value == null ? '' : value;
-            });
-            if (nodes[0].tagName === 'SELECT' || nodes[0].type === 'checkbox' || nodes[0].type === 'radio') {
-              nodes.forEach(el => el.dispatchEvent(new Event('change', { bubbles: true })));
-            }
-          });
-        }
-
-        function offer(draft) {
-          const bar = document.createElement('div');
-          bar.className = 'alert alert-warning d-flex flex-wrap align-items-center gap-2 mb-3';
-          bar.setAttribute('role', 'status');
-          const when = new Date(draft.t).toLocaleString('pt-BR', {
-            day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
-          });
-          const text = document.createElement('span');
-          text.className = 'flex-grow-1';
-          text.textContent = 'Rascunho não enviado de ' + when + '.';
-          const restore = document.createElement('button');
-          restore.type = 'button';
-          restore.className = 'btn-a primary';
-          restore.textContent = 'Restaurar';
-          const drop = document.createElement('button');
-          drop.type = 'button';
-          drop.className = 'btn-a outline';
-          drop.textContent = 'Descartar';
-          bar.append(text, restore, drop);
-          quoteForm.insertBefore(bar, quoteForm.firstChild);
-          restore.addEventListener('click', function () {
-            apply(draft.data);
-            bar.remove();
-          });
-          drop.addEventListener('click', function () {
-            clear();
-            bar.remove();
-          });
-        }
-
-        ['input', 'change'].forEach(evt => {
-          quoteForm.addEventListener(evt, function () {
-            window.clearTimeout(saveTimer);
-            saveTimer = window.setTimeout(write, 600);
-          });
-        });
-
-        const pending = read();
-        if (pending) offer(pending);
-      })();
 
       // ── On page load: highlight fields with server-side errors + scroll ──
       (function() {

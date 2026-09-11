@@ -743,5 +743,17 @@
     }, { passive: true });
   })();
   </script>
+<script>
+  // O pedido chegou ao servidor: o rascunho local ja cumpriu o papel.
+  (function () {
+    try {
+      ['{% url "sales:order_create_standalone" %}', '{% url "sales:order_edit" order.id %}']
+        .forEach(function (path) {
+          localStorage.removeItem('roselar.rascunho.pedido:' + path);
+        });
+    } catch (err) {}
+  })();
+</script>
 </body>
+
 </html>

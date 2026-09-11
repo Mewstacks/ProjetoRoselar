@@ -61,7 +61,11 @@
     (root || document).querySelectorAll('[data-financial]').forEach(function (input) {
       var type = input.dataset.financial;
       input.setAttribute('inputmode', type === MONEY ? 'numeric' : 'decimal');
-      input.setAttribute('autocomplete', 'off');
+      // Sem autocomplete="off": ele desliga tambem a restauracao do valor no
+      // botao "voltar" do navegador, e so os campos de dinheiro voltavam
+      // vazios enquanto o resto da linha voltava preenchido.
+      // https://developer.mozilla.org/en-US/docs/Web/Security/Practical_implementation_guides/Turning_off_form_autocompletion
+      input.removeAttribute('autocomplete');
       if (input.value) {
         input.value = type === MONEY ? moneyFromValue(input.value) : percentFromValue(input.value);
       }
@@ -84,23 +88,48 @@
     }
   }, true);
 
-  document.addEventListener('submit', function (event) {
-    event.target.querySelectorAll('[data-financial]').forEach(function (input) {
-      var displayedValue = input.value;
-      input.value = wireValue(input);
-      // A serialização do formulário ocorre antes da próxima tarefa. Restaurar o
-      // formato visual evita que uma validação local deixe o usuário olhando para
-      // um número técnico com ponto decimal.
-      window.setTimeout(function () {
-        if (document.contains(input)) input.value = displayedValue;
-      }, 0);
+  // O servidor recebe o valor técnico ("7900.00"); o vendedor continua vendo
+  // o que digitou ("7.900,00"). Antes o envio sobrescrevia o próprio campo e
+  // tentava devolver o formato visual num setTimeout — que nunca roda quando a
+  // página navega. Voltar pelo botão "voltar" trazia o campo com o número
+  // técnico, ou vazio. Agora o campo visível nunca é alterado: ele sai do envio
+  // (disabled) e um hidden de mesmo nome leva o valor técnico no lugar dele.
+  function unmute(root) {
+    (root || document).querySelectorAll('[data-financial-muted]').forEach(function (input) {
+      input.disabled = false;
+      input.removeAttribute('data-financial-muted');
     });
+    (root || document).querySelectorAll('[data-financial-wire]').forEach(function (node) {
+      node.remove();
+    });
+  }
+
+  document.addEventListener('submit', function (event) {
+    var form = event.target;
+    if (!form || form.tagName !== 'FORM') return;
+    unmute(form);
+    form.querySelectorAll('[data-financial]').forEach(function (input) {
+      if (!input.name || input.disabled) return;
+      var wire = document.createElement('input');
+      wire.type = 'hidden';
+      wire.name = input.name;
+      wire.value = wireValue(input);
+      wire.setAttribute('data-financial-wire', '');
+      input.insertAdjacentElement('afterend', wire);
+      input.disabled = true;
+      input.setAttribute('data-financial-muted', '');
+    });
+    // Validação local que cancela o envio devolve o campo ao usuário: a
+    // serialização do formulário já aconteceu quando esta tarefa roda.
+    window.setTimeout(function () { unmute(form); }, 0);
   }, true);
 
-  // Voltar pelo botao "voltar" restaura a pagina com o valor tecnico que o
-  // envio deixou no campo ("7900.00"). Reformatar na volta evita que o
-  // vendedor encare um numero com ponto decimal — ou o reenvie assim.
-  window.addEventListener('pageshow', function () { initialise(document); });
+  // Página restaurada do cache volta com os campos desligados do envio
+  // anterior. Religar aqui evita um formulário que parece travado.
+  window.addEventListener('pageshow', function () {
+    unmute(document);
+    initialise(document);
+  });
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', function () { initialise(document); });

@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Editar Pedido #{{ order.number }} | Roselar</title>
+  <title>{% if order.number %}Editar Pedido #{{ order.number }}{% else %}Novo Pedido{% endif %} | Roselar</title>
   <link rel="apple-touch-icon" sizes="180x180" href="{% static 'assets/img/favicons/apple-touch-icon.png' %}">
   <link rel="icon" type="image/png" sizes="32x32" href="{% static 'assets/img/favicons/favicon-32x32.png' %}">
   <link rel="icon" type="image/png" sizes="16x16" href="{% static 'assets/img/favicons/favicon-16x16.png' %}">
@@ -112,7 +112,7 @@
                     {% if is_standalone %}
                       Novo Pedido Avulso (Compra da Loja)
                     {% else %}
-                      Editar Pedido #{{ order.number }}
+                      {% if order.number %}Editar Pedido #{{ order.number }}{% else %}Novo Pedido{% endif %}
                       {% if order.is_total_conference %}<span style="font-size:.75rem;color:var(--blue);font-weight:700;">(Pedido Total)</span>{% endif %}
                     {% endif %}
                   </h1>
@@ -148,7 +148,10 @@
         </div>
         {% endif %}
 
-        <form method="post" id="order-form">
+        <form method="post" id="order-form"
+              data-draft="pedido"
+              data-draft-requires="-product_name,-purchase_unit_cost,-quantity"
+              data-draft-add-row="addFormRow">
           {% csrf_token %}
 
           <!-- ═══ DADOS DO PEDIDO ═══ -->
@@ -296,6 +299,7 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.min.js"></script>
   <script src="{% static 'assets/js/theme.js' %}"></script>
   <script src="{% static 'assets/js/financial-inputs.js' %}"></script>
+  <script src="{% static 'assets/js/form-draft.js' %}"></script>
   <script src="https://cdn.jsdelivr.net/npm/flowbite@2.5.2/dist/flowbite.min.js"></script>
   <script>
     const FORMSET_PREFIX = "{{ formset.prefix }}";
