@@ -49,3 +49,35 @@ class PaymentTariffFeeTests(TestCase):
             PaymentTariff.get_fee("BOLETO_30", 1),
             Decimal("0.00"),
         )
+
+import os as _os
+
+from django.contrib.staticfiles import finders as _staticfiles_finders
+
+
+class StaticFilesExposureTests(TestCase):
+    """
+    STATICFILES_DIRS apontava para `templates/` inteiro, entao collectstatic
+    publicava cada template como arquivo estatico: /static/sales/quote_form.html
+    devolvia o codigo-fonte da tela para qualquer visitante, sem login.
+    """
+
+    def test_templates_are_not_served_as_static_files(self):
+        for path in (
+            "sales/quote_form.html",
+            "sales/quote_detail.html",
+            "accounts/login.html",
+        ):
+            self.assertIsNone(
+                _staticfiles_finders.find(_os.path.join(*path.split("/"))),
+                f"{path} esta publicado em /static/",
+            )
+
+    def test_assets_are_still_served(self):
+        for path in (
+            "assets/js/financial-inputs.js",
+            "assets/css/user.css",
+        ):
+            self.assertIsNotNone(
+                _staticfiles_finders.find(_os.path.join(*path.split("/"))), path
+            )

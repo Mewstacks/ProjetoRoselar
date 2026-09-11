@@ -157,8 +157,13 @@ USE_TZ = True
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
+# Apontar para `templates/` inteiro publicava cada template Django como arquivo
+# estatico: /static/sales/quote_form.html abria o codigo-fonte da tela para
+# qualquer visitante, sem login. Os arquivos publicos sairam de dentro de
+# `templates/` e viraram `static/assets/`, entao as URLs /static/assets/...
+# que todos os {% static %} ja usam continuam iguais.
 STATICFILES_DIRS = [
-    BASE_DIR / 'templates',
+    BASE_DIR / 'static',
 ]
 
 STORAGES = {
