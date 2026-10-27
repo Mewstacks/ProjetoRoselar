@@ -1,0 +1,14 @@
+.git
+.claude
+.playwright-mcp
+.impeccable
+.venv
+venv
+**/__pycache__
+*.pyc
+*.png
+db.sqlite3
+data_dump.json
+media
+staticfiles
+.env*

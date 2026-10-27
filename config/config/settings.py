@@ -23,7 +23,8 @@ DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 
 # Production = deployed on Railway. Local runs (sem RAILWAY_ENVIRONMENT)
 # continuam usando o fallback de dev, evitando quebrar o fluxo local.
-_IS_PRODUCTION = bool(os.environ.get('RAILWAY_ENVIRONMENT'))
+_FLY_APP = os.environ.get('FLY_APP_NAME')
+_IS_PRODUCTION = bool(os.environ.get('RAILWAY_ENVIRONMENT') or _FLY_APP)
 
 # SECURITY WARNING: keep the secret key used in production secret!
 _secret = os.environ.get('SECRET_KEY')
@@ -44,6 +45,8 @@ if _railway_host and _railway_host not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append(_railway_host)
 if '.up.railway.app' not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append('.up.railway.app')
+if _FLY_APP and f'{_FLY_APP}.fly.dev' not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(f'{_FLY_APP}.fly.dev')
 
 
 # Application definition
@@ -105,10 +108,10 @@ if DATABASE_URL:
             ssl_require=False,          # Railway internal network = no SSL
         )
     }
-elif os.environ.get("RAILWAY_ENVIRONMENT"):
+elif _IS_PRODUCTION:
     raise ImproperlyConfigured(
-        "DATABASE_URL is not set on Railway. "
-        "Link the Postgres service to this app (Variables → Add Reference)."
+        "DATABASE_URL is not set in production. On Railway link the Postgres "
+        "service (Variables → Add Reference); on Fly run `fly postgres attach`."
     )
 else:
     DATABASES = {
@@ -187,7 +190,10 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # apagado a cada deploy/restart. Se houver um volume anexado ao serviço,
 # a Railway define RAILWAY_VOLUME_MOUNT_PATH e os uploads vão para lá.
 MEDIA_URL = '/media/'
-_volume_path = os.environ.get('RAILWAY_VOLUME_MOUNT_PATH')
+_volume_path = (
+    os.environ.get('MEDIA_VOLUME_PATH')
+    or os.environ.get('RAILWAY_VOLUME_MOUNT_PATH')
+)
 if _volume_path:
     MEDIA_ROOT = Path(_volume_path) / 'media'
 elif _IS_PRODUCTION:
@@ -228,6 +234,11 @@ if _railway_domain:
     _origin = f'https://{_railway_domain}'
     if _origin not in CSRF_TRUSTED_ORIGINS:
         CSRF_TRUSTED_ORIGINS.append(_origin)
+
+if _FLY_APP:
+    _fly_origin = f'https://{_FLY_APP}.fly.dev'
+    if _fly_origin not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(_fly_origin)
 
 # Railway proxy terminates SSL – tell Django the real protocol
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')

@@ -14,6 +14,11 @@ from django.core.cache import cache
 # pois o cliente pode forjar as entradas mais à esquerda.
 TRUSTED_PROXY_COUNT = int(os.environ.get("TRUSTED_PROXY_COUNT", "1"))
 
+# No Fly o ultimo item do X-Forwarded-For e o IP do proprio app, nao o do
+# cliente; o proxy entrega o IP real em Fly-Client-IP.
+# https://docs.fly.io/networking/request-headers
+FLY_APP = os.environ.get("FLY_APP_NAME")
+
 
 def client_ip(request) -> str:
     """IP real do cliente, à prova de spoofing do X-Forwarded-For.
@@ -23,6 +28,10 @@ def client_ip(request) -> str:
     da direita, onde N = TRUSTED_PROXY_COUNT. Se o cabeçalho for mais curto
     que o esperado, cai para REMOTE_ADDR (conexão direta).
     """
+    if FLY_APP:
+        fly_ip = (request.META.get("HTTP_FLY_CLIENT_IP") or "").strip()
+        if fly_ip:
+            return fly_ip
     xff = request.META.get("HTTP_X_FORWARDED_FOR")
     if xff and TRUSTED_PROXY_COUNT > 0:
         parts = [p.strip() for p in xff.split(",") if p.strip()]

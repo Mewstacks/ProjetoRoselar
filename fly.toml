@@ -1,0 +1,41 @@
+app = 'roselar'
+primary_region = 'iad'
+
+# Precisa ficar no nivel raiz; dentro de [[vm]] o Fly ignora.
+swap_size_mb = 512
+
+[build]
+
+[deploy]
+  release_command = 'python manage.py migrate --no-input'
+
+[env]
+  PORT = '8000'
+  MEDIA_VOLUME_PATH = '/data'
+
+[mounts]
+  source = 'roselar_data'
+  destination = '/data'
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = 'off'
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = '30s'
+    interval = '30s'
+    method = 'GET'
+    timeout = '5s'
+    path = '/health/'
+
+    # Sem estes dois, Django devolve 400 (Host) ou 301 (SECURE_SSL_REDIRECT).
+    [http_service.checks.headers]
+      Host = 'roselar.fly.dev'
+      X-Forwarded-Proto = 'https'
+
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '256mb'
