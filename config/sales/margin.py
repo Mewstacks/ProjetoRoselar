@@ -9,7 +9,7 @@ o que fazia o Relatório de Comissões divergir do simulador.
 from __future__ import annotations
 
 import json
-from decimal import Decimal, ROUND_CEILING
+from decimal import Decimal, ROUND_CEILING, ROUND_HALF_UP
 
 
 def _run_simulation(
@@ -401,6 +401,20 @@ def _build_simulation_context(
     total_before_disc = adj_pre_override + freight_cobrado
     discount_value    = resultado['totals']['discount_value']
     final_total       = resultado['totals']['final_total']
+
+    # Desconto real, só com preço final digitado: valor de tabela (itens + frete
+    # repassado, antes do markup por dentro) menos o preço cobrado. É o único
+    # desconto que existe nesse caso — a barrinha fica travada e fora da conta.
+    if total_override is not None and subtotal > 0:
+        real_gap = (subtotal + freight_value - final_total).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+        real_pct = (real_gap / subtotal * Decimal("100")).quantize(
+            Decimal("0.1"), rounding=ROUND_HALF_UP
+        )
+    else:
+        real_gap = Decimal("0.00")
+        real_pct = Decimal("0.0")
     down_payment_used = resultado['totals']['down_payment']
     financed_value    = resultado['totals']['financed']
     payment_fee_value = resultado['costs']['bank_interest']
@@ -629,6 +643,11 @@ def _build_simulation_context(
         'total_override_active':    total_override is not None,
         'total_override_value':     total_override,
         'override_adjust_value':    final_total - total_before_disc,
+        'real_gap':                 real_gap,
+        'real_gap_abs':             abs(real_gap),
+        'real_pct':                 real_pct,
+        'real_pct_abs':             abs(real_pct),
+        'real_is_increase':         real_gap < 0,
         'discount_value':           discount_value,
         'total_after_discount':     final_total,
         'final_total':               final_total,

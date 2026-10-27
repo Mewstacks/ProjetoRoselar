@@ -94,11 +94,22 @@ def _build_value_breakdown(quote):
         if quote.dual_pricing
         else PriceTier.RETAIL
     )
+    has_override = (
+        selected_tier == PriceTier.RETAIL
+        and quote.effective_total_override is not None
+    )
     subtotal = quote.calculate_subtotal_for_tier(selected_tier)
-    markup_pct = quote.price_increase_percent or Decimal("0.00")
+    # Com preço final digitado a barrinha e o Ajuste de Preço não formam o
+    # total: mostrá-los aqui inventaria um desconto/acréscimo que não existe.
+    # A diferença entre o valor de tabela e o preço final é o desconto real.
+    markup_pct = (
+        Decimal("0.00")
+        if has_override
+        else (quote.price_increase_percent or Decimal("0.00"))
+    )
     discount_pct = (
         Decimal("0.00")
-        if selected_tier == PriceTier.WHOLESALE
+        if selected_tier == PriceTier.WHOLESALE or has_override
         else (quote.discount_percent or Decimal("0.00"))
     )
     markup_amount = subtotal * markup_pct / Decimal("100")
@@ -111,9 +122,12 @@ def _build_value_breakdown(quote):
             subtotal * (Decimal("1") + markup_pct / Decimal("100"))
             + quote.billable_freight
         )
+    elif has_override:
+        total_with_discount = quote.calculate_list_value(selected_tier)
     else:
         total_with_discount = quote.calculate_total_with_freight_and_discount()
     rounded_total = quote.calculate_total_for_tier(selected_tier)
+    real_gap, real_pct = quote.calculate_real_gap(selected_tier, total=rounded_total)
     payment_fee = quote.calculate_payment_fee_value(rounded_total)
     from .models import RoundingMode
     breakdown = {
@@ -133,19 +147,22 @@ def _build_value_breakdown(quote):
         "rounded_total": rounded_total,
         "rounding_diff": rounded_total - total_with_discount,
         "has_rounding": (
-            (
-                selected_tier == PriceTier.RETAIL
-                and quote.effective_total_override is not None
-            )
+            has_override
             or quote.total_rounding_mode != RoundingMode.NONE
             or (quote.total_manual_adjustment or Decimal("0.00")) != Decimal("0.00")
         ),
         # Preço final digitado não é arredondamento: o rótulo precisa dizer de
         # onde veio a diferença para o financeiro não caçar um ajuste inexistente.
-        "has_override": (
-            selected_tier == PriceTier.RETAIL
-            and quote.effective_total_override is not None
-        ),
+        "has_override": has_override,
+        # Desconto real: valor de tabela − total pago (positivo = desconto,
+        # negativo = acréscimo). É o único número de desconto que vale quando há
+        # preço final digitado; sem ele a barrinha gravada contaria outra história.
+        "real_gap": real_gap,
+        "real_gap_abs": abs(real_gap),
+        "real_pct": real_pct,
+        "real_pct_abs": abs(real_pct),
+        "is_real_discount": real_gap > 0,
+        "is_real_increase": real_gap < 0,
         "dual_pricing": quote.dual_pricing,
         "selected_price_tier": selected_tier,
         "selected_price_tier_label": PriceTier(selected_tier).label,
@@ -1749,7 +1766,14 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
         # de preço, desconto, FRETE e preço final/arredondamento embutidos.
         # Antes o PDF recomputava sem o frete e divergia do total do sistema.
         subtotal   = quote.calculate_subtotal()
-        disc_pct   = quote.discount_percent or Decimal('0')
+        # Com preço final digitado a barrinha não forma o total: o PDF mostra só o
+        # preço final, sem "valor sem desconto" riscado nem "com desconto". O que
+        # a barrinha tenha gravado é entrada esquecida, não desconto dado.
+        disc_pct   = (
+            Decimal('0')
+            if quote.effective_total_override is not None
+            else (quote.discount_percent or Decimal('0'))
+        )
         disc_val   = subtotal * disc_pct / Decimal('100')
         avista     = PAYMENT_PLANS[0]["total"]
         list_price = avista + disc_val                 # "valor sem desconto"
@@ -3123,6 +3147,20 @@ def quote_simulate_commission(request: HttpRequest, quote_id: int) -> HttpRespon
     # Frete por conta da loja (STORE) não é repassado ao cliente: fica fora do
     # total e da comissão. billable_freight já zera esse caso.
     freight_value = quote.billable_freight
+    # Preço final digitado ("Preço Final ao Cliente", ou o à vista quando a venda
+    # fechou à vista) é o valor da venda e vale só para o varejo. Com ele a
+    # barrinha e o Ajuste de Preço não formam o total: ficam travados na tela e o
+    # servidor não aceita que mudem, nem por um POST antigo ou forjado.
+    sim_total_override = (
+        (
+            quote.effective_cash_override
+            if quote.selected_payment_terms == PaymentTerms.CASH
+            and quote.effective_cash_override is not None
+            else quote.effective_total_override
+        )
+        if pricing_tier == PriceTier.RETAIL
+        else None
+    )
 
     if request.method == "POST":
         sim_payment_type    = request.POST.get('sim_payment_type', '') or ''
@@ -3144,6 +3182,10 @@ def quote_simulate_commission(request: HttpRequest, quote_id: int) -> HttpRespon
         try:
             price_increase_pct_2 = Decimal(request.POST.get('price_increase_percent_2', '0') or '0')
         except Exception:
+            price_increase_pct_2 = Decimal('0')
+        if sim_total_override is not None:
+            sim_discount = quote.discount_percent or Decimal('0')
+            price_increase_pct = quote.price_increase_percent or Decimal('0')
             price_increase_pct_2 = Decimal('0')
         try:
             _sa = request.POST.get('sim_split_amount', '') or ''
@@ -3221,16 +3263,7 @@ def quote_simulate_commission(request: HttpRequest, quote_id: int) -> HttpRespon
         # "Preço Final ao Cliente" digitado no orçamento é o valor real da venda;
         # sem ele aqui o simulador mostrava o total calculado pelos produtos e
         # divergia do detalhe, do PDF e da comissão. Vale só para o varejo.
-        total_override=(
-            (
-                quote.effective_cash_override
-                if quote.selected_payment_terms == PaymentTerms.CASH
-                and quote.effective_cash_override is not None
-                else quote.effective_total_override
-            )
-            if pricing_tier == PriceTier.RETAIL
-            else None
-        ),
+        total_override=sim_total_override,
     )
     ctx["pricing_tier"] = pricing_tier
     ctx["pricing_tier_label"] = PriceTier(pricing_tier).label
@@ -3264,9 +3297,12 @@ def quote_simulate_commission(request: HttpRequest, quote_id: int) -> HttpRespon
         before = quote_financial_snapshot(quote)
 
         with transaction.atomic():
-            if pricing_tier == PriceTier.RETAIL:
-                quote.discount_percent = ctx['discount_percent']
-            quote.price_increase_percent = ctx['price_increase_pct']
+            # Preço final digitado trava a barrinha e o Ajuste de Preço: o que
+            # estava gravado fica como está.
+            if sim_total_override is None:
+                if pricing_tier == PriceTier.RETAIL:
+                    quote.discount_percent = ctx['discount_percent']
+                quote.price_increase_percent = ctx['price_increase_pct']
             quote.payment_type           = ctx['sim_payment_type']
             quote.payment_installments   = ctx['sim_installments']
             quote.payment_fee_percent    = ctx['payment_fee_percent']

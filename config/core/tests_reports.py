@@ -405,11 +405,13 @@ class DiscountReportTests(ReportTestBase):
         self.assertEqual(resp.context["avg_discount"], Decimal("10.0"))
 
     def test_draft_excluded_by_default_and_included_in_broad_mode(self):
-        Quote.objects.create(
+        draft = Quote.objects.create(
             number="ORC-DRAFT", customer=self.customer, seller=self.seller,
             status=QuoteStatus.DRAFT, quote_date=self.today,
             discount_percent=Decimal("25.0"), freight_responsible="CUSTOMER",
         )
+        # O desconto real deriva dos totais: sem item não há valor de tabela.
+        draft.items.create(product_name="Mesa", quantity=1, unit_value=Decimal("1000.00"))
 
         default = self.client.get(reverse("core:report_discounts"), self._period_qs())
         self.assertEqual(default.context["total_count"], 0)
@@ -417,6 +419,50 @@ class DiscountReportTests(ReportTestBase):
         broad = self.client.get(reverse("core:report_discounts"), self._period_qs(sold_only="0"))
         self.assertEqual(broad.context["total_count"], 1)
         self.assertEqual(broad.context["date_basis"], "data do orçamento")
+
+    def test_final_price_below_items_is_listed_even_with_bar_at_zero(self):
+        """Preço final menor que os itens é desconto dado, mesmo sem a barrinha."""
+        self._sale(
+            "V-1", items=[("Mesa", 1, "1000.00")],
+            total_override=Decimal("900.00"), discount_percent=Decimal("0.0"),
+        )
+
+        resp = self.client.get(reverse("core:report_discounts"), self._period_qs())
+
+        self.assertEqual(resp.context["total_count"], 1)
+        self.assertEqual(resp.context["avg_discount"], Decimal("10.0"))
+        row = resp.context["quotes"][0]
+        self.assertEqual(row.real_discount_snapshot, Decimal("100.00"))
+        self.assertEqual(row.real_discount_pct_snapshot, Decimal("10.0"))
+
+    def test_final_price_above_items_is_not_a_discount_despite_the_bar(self):
+        """Barrinha esquecida em 5% não vira desconto quando o preço final sobe."""
+        self._sale(
+            "V-1", items=[("Mesa", 1, "1000.00")],
+            total_override=Decimal("1100.00"), discount_percent=Decimal("5.0"),
+        )
+
+        resp = self.client.get(reverse("core:report_discounts"), self._period_qs())
+
+        self.assertEqual(resp.context["total_count"], 0)
+
+    def test_csv_export_writes_the_real_discount_never_a_negative(self):
+        self._sale(
+            "V-1", items=[("Mesa", 1, "1000.00")],
+            total_override=Decimal("900.00"), discount_percent=Decimal("0.0"),
+        )
+        self._sale(
+            "V-2", items=[("Mesa", 1, "1000.00")],
+            total_override=Decimal("1100.00"), discount_percent=Decimal("5.0"),
+        )
+
+        resp = self.client.get(reverse("core:report_csv_export"), self._period_qs())
+
+        linhas = resp.content.decode("utf-8-sig").splitlines()
+        self.assertIn("Desconto %", linhas[0])
+        por_numero = {l.split(";")[0]: l.split(";") for l in linhas[1:]}
+        self.assertEqual(por_numero["V-1"][4], "10.0")
+        self.assertEqual(por_numero["V-2"][4], "0.0")
 
 
 class ProductReportTests(ReportTestBase):

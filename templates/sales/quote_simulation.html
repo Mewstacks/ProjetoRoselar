@@ -172,7 +172,7 @@
       cursor: pointer;
       transition: background .15s;
     }
-    .pct-btn:hover { background: #e8edf3; }
+    .pct-btn:not(:disabled):hover { background: #e8edf3; }
     .pct-input {
       width: 64px;
       border: 0;
@@ -184,6 +184,21 @@
       background: transparent;
     }
     .pct-input:focus { outline: none; }
+    /* Controle desligado (atacado ou preço final digitado): some o convite ao clique. */
+    .pct-btn:disabled, .pct-input:disabled, input[type=range]:disabled { opacity: .5; cursor: not-allowed; }
+    input[type=range]:disabled::-webkit-slider-thumb { transform: none; cursor: not-allowed; }
+    input[type=range]:disabled::-moz-range-thumb { cursor: not-allowed; }
+    .lock-set { border: 0; padding: 0; margin: 0; min-width: 0; }
+    .lock-row {
+      display: flex; align-items: center; justify-content: space-between;
+      flex-wrap: wrap; gap: .5rem; margin-bottom: .65rem;
+    }
+    .lock-tag {
+      display: inline-flex; align-items: center; gap: .4rem;
+      font-size: .72rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .05em; color: var(--muted);
+    }
+    .lock-edit { min-height: 44px; }
     .pct-suffix {
       display: inline-flex;
       align-items: center;

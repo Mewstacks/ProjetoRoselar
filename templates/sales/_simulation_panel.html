@@ -32,12 +32,19 @@
                 Desconto
               </div>
               <div class="s-body">
+                {% if total_override_active %}
+                  <div class="lock-row">
+                    <span class="lock-tag"><i class="fa-solid fa-lock" aria-hidden="true"></i>Preço final</span>
+                    <a class="btn-a secondary lock-edit" href="{% url 'sales:quote_edit' quote.id %}#id_total_override">Editar preço</a>
+                  </div>
+                {% endif %}
                 {% if quote.dual_pricing and pricing_tier == 'WHOLESALE' %}
                   <div class="sim-msg" style="background:#f1f3f5;color:var(--brand);margin-bottom:.65rem;">
                     <i class="fa-solid fa-circle-info"></i>
                     <div>Simulação em <strong>Atacado</strong>: o desconto pertence somente ao varejo e fica desativado aqui.</div>
                   </div>
                 {% endif %}
+                <fieldset class="lock-set"{% if total_override_active %} disabled{% endif %}>
                 <div class="slider-box">
                   <div class="slider-row">
                     <span class="s-min">0%</span>
@@ -62,6 +69,7 @@
                          oninput="onDiscountChange(this.value); scheduleSubmit()"
                          {% if quote.dual_pricing and pricing_tier == 'WHOLESALE' %}disabled{% endif %}>
                 </div>
+                </fieldset>
                 {% if controls_blocked and subtotal %}
                 <div class="sim-msg bad">
                   <i class="fa-solid fa-lock"></i>
@@ -70,10 +78,10 @@
                 {% endif %}
                 <div class="row g-2">
                   <div class="col-6">
-                    <div class="stat"><div class="stat-l">Desconto</div><div class="stat-v red" id="live-discount-val">{{ discount_percent }}%</div></div>
+                    <div class="stat"><div class="stat-l">{% if total_override_active %}{% if real_is_increase %}Acréscimo real{% else %}Desconto real{% endif %}{% else %}Desconto{% endif %}</div><div class="stat-v{% if not total_override_active or not real_is_increase %} red{% endif %}" id="live-discount-val">{% if total_override_active %}{{ real_pct_abs|floatformat:1 }}{% else %}{{ discount_percent }}{% endif %}%</div></div>
                   </div>
                   <div class="col-6">
-                    <div class="stat"><div class="stat-l">Valor</div><div class="stat-v red" id="live-discount-amount">R$ {{ discount_value|floatformat:2 }}</div></div>
+                    <div class="stat"><div class="stat-l">Valor</div><div class="stat-v{% if not total_override_active or not real_is_increase %} red{% endif %}" id="live-discount-amount">R$ {% if total_override_active %}{{ real_gap_abs|floatformat:2 }}{% else %}{{ discount_value|floatformat:2 }}{% endif %}</div></div>
                   </div>
                 </div>
               </div>
@@ -93,6 +101,13 @@
               </div>
               <div class="collapse {% if margin_exceeded_1 or margin_exceeded_2 %}show{% endif %}" id="increase-collapse">
                 <div class="s-body">
+                  {% if total_override_active %}
+                  <div class="lock-row">
+                    <span class="lock-tag"><i class="fa-solid fa-lock" aria-hidden="true"></i>Preço final</span>
+                    <a class="btn-a secondary lock-edit" href="{% url 'sales:quote_edit' quote.id %}#id_total_override">Editar preço</a>
+                  </div>
+                  {% endif %}
+                  <fieldset class="lock-set"{% if total_override_active %} disabled{% endif %}>
 
                   <!-- ─── Slider Método 1 (single mode + installment split method 1) ─── -->
                   <div id="inc1-wrap" style="display:{% if split_mode and split_m1_avista %}none{% else %}block{% endif %};"
@@ -161,6 +176,7 @@
                     </div>
                     {% endif %}
                   </div>
+                  </fieldset>
 
                   <hr style="border-color:var(--border);margin:.8rem 0;">
                   <div id="margin-zone">
@@ -506,7 +522,7 @@
                   <span class="r-l">Subtotal dos itens</span>
                   <strong>R$ {{ subtotal|floatformat:2 }}</strong>
                 </div>
-                {% if price_increase_pct > 0 %}
+                {% if price_increase_pct > 0 and not total_override_active %}
                 <div class="r-line">
                   <span style="color:var(--green);font-size:.78rem;"><i class="fa-solid fa-arrow-up me-1" style="font-size:.72rem;"></i>Ajuste de Preço ({{ price_increase_pct|floatformat:1 }}%)</span>
                   <strong style="color:var(--green);">+ R$ {{ price_increase_value|floatformat:2 }}</strong>
@@ -528,6 +544,15 @@
                   <strong>R$ {{ freight_value|floatformat:2 }}</strong>
                 </div>
                 {% endif %}
+                {% if total_override_active %}
+                {# Preço final digitado: a barrinha não forma o total, então só o desconto real aparece. #}
+                <div class="r-line">
+                  <span class="r-l">{% if real_is_increase %}Acréscimo real{% else %}Desconto real{% endif %} ({{ real_pct_abs|floatformat:1 }}%)</span>
+                  <strong style="color:{% if real_is_increase %}var(--green){% else %}var(--red){% endif %};">
+                    {% if real_is_increase %}+ R$ {{ real_gap_abs|floatformat:2 }}{% else %}– R$ {{ real_gap_abs|floatformat:2 }}{% endif %}
+                  </strong>
+                </div>
+                {% else %}
                 <div class="r-line">
                   <span class="r-l">Total antes do desconto</span>
                   <strong>R$ {{ total_before_discount|floatformat:2 }}</strong>
@@ -538,14 +563,6 @@
                   <strong style="color:var(--red);">– R$ {{ discount_value|floatformat:2 }}</strong>
                 </div>
                 {% endif %}
-
-                {% if total_override_active %}
-                <div class="r-line">
-                  <span class="r-l"><i class="fa-solid fa-pen me-1" style="font-size:.72rem;"></i>Preço final ao cliente (digitado no orçamento)</span>
-                  <strong style="color:{% if override_adjust_value < 0 %}var(--red){% else %}var(--green){% endif %};">
-                    {% if override_adjust_value < 0 %}– R$ {{ override_adjust_value|floatformat:2|cut:"-" }}{% else %}+ R$ {{ override_adjust_value|floatformat:2 }}{% endif %}
-                  </strong>
-                </div>
                 {% endif %}
 
                 {% if down_payment_value > 0 %}

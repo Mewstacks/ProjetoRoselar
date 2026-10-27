@@ -9,7 +9,8 @@ from decimal import Decimal
 
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
-from django.db.models import Sum, Count, Q, Avg
+from django.db.models import Sum, Count, Q, Avg, F, Value, DecimalField
+from django.db.models.functions import Greatest
 
 
 def health_check(request):
@@ -37,6 +38,21 @@ from accounts.models import User, Role
 from calendar_app.models import CalendarEvent, EventStatus
 
 logger = logging.getLogger(__name__)
+
+
+def _real_discount_pct():
+    """Desconto real (%) de cada orçamento, para médias e rankings.
+
+    Lê o snapshot derivado dos totais (`Quote.real_discount_pct_snapshot`), não
+    a barrinha digitada (`discount_percent`): com preço final digitado a barrinha
+    não diz quanto foi dado. Acréscimo (negativo) conta como zero para não abater
+    o desconto de outras vendas.
+    """
+    return Greatest(
+        F("real_discount_pct_snapshot"),
+        Value(Decimal("0.0")),
+        output_field=DecimalField(max_digits=7, decimal_places=1),
+    )
 
 
 def _json_html(data) -> str:
@@ -195,7 +211,7 @@ def home(request):
 
         # Avg discount
         avg_discount = (
-            my_converted_month.aggregate(avg=Avg("discount_percent"))["avg"] or 0
+            my_converted_month.aggregate(avg=Avg(_real_discount_pct()))["avg"] or 0
         )
 
         # Pending quotes
@@ -374,10 +390,10 @@ def home(request):
                 Quote.objects.sold().filter(
                     sold_on__gte=month_start,
                     sold_on__lte=month_end,
-                    discount_percent__gt=0,
+                    real_discount_pct_snapshot__gt=0,
                 )
                 .values("seller__username")
-                .annotate(avg_disc=Avg("discount_percent"))
+                .annotate(avg_disc=Avg("real_discount_pct_snapshot"))
                 .order_by("-avg_disc")[:10]
             )
             bi_disc_labels = [d["seller__username"] for d in bi_discount_data]
@@ -598,7 +614,7 @@ def dashboard(request):
 
     # ── Avg discount ──
     avg_discount = (
-        my_converted_month.aggregate(avg=Avg("discount_percent"))["avg"] or 0
+        my_converted_month.aggregate(avg=Avg(_real_discount_pct()))["avg"] or 0
     )
 
     context = {
@@ -1257,7 +1273,7 @@ def report_commissions(request):
         if q.commission_source == CommissionSource.BACKFILL:
             estimated_count += 1
 
-        discount = q.discount_percent or Decimal("0")
+        discount = max(q.real_discount_pct_snapshot or Decimal("0"), Decimal("0"))
         # Divide pelo total de participantes, não só pelos que recebem: a parte
         # do financeiro evapora em vez de engordar a do vendedor.
         shares = Decimal(len(recipients))
@@ -1394,12 +1410,12 @@ def report_discounts(request):
         )
 
     qs = (
-        qs.filter(discount_percent__gt=0)
+        qs.filter(real_discount_pct_snapshot__gt=0)
         .select_related("seller", "customer", "discount_authorized_by")
-        .order_by("-discount_percent")
+        .order_by("-real_discount_pct_snapshot")
     )
 
-    avg = qs.aggregate(avg=Avg("discount_percent"))["avg"] or Decimal("0")
+    avg = qs.aggregate(avg=Avg("real_discount_pct_snapshot"))["avg"] or Decimal("0")
     authorized_count = qs.filter(discount_authorized_by__isnull=False).count()
     total_count = qs.count()
 
@@ -1473,7 +1489,10 @@ def report_csv_export(request):
             (q.sold_on or q.quote_date).strftime("%d/%m/%Y"),
             _csv_safe(q.customer.name),
             _csv_safe(q.seller.username),
-            _csv_safe(f"{q.discount_percent}"),
+            # Desconto real, não a barrinha. Acréscimo (negativo) sai como 0: a
+            # coluna é desconto, e o menos no início da célula seria neutralizado
+            # por _csv_safe. O cabeçalho não muda para não quebrar planilhas.
+            _csv_safe(f"{max(q.real_discount_pct_snapshot or Decimal('0.0'), Decimal('0.0'))}"),
             _csv_safe(f"{q.total_value_snapshot}"),
         ])
 

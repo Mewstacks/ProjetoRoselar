@@ -438,6 +438,20 @@ class Quote(models.Model):
     # snapshots
     total_value_snapshot = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"), verbose_name="Total (R$)")
 
+    # Desconto real = valor de tabela (itens + frete repassado) menos o total que
+    # o cliente paga. É derivado, nunca digitado: a barrinha (discount_percent) é
+    # só uma entrada e, com preço final digitado, não diz nada sobre quanto foi
+    # dado. Positivo = desconto; negativo = acréscimo. Mantido junto com
+    # total_value_snapshot, e é nele que os relatórios de desconto leem.
+    real_discount_snapshot = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal("0.00"),
+        verbose_name="Desconto real (R$)",
+    )
+    real_discount_pct_snapshot = models.DecimalField(
+        max_digits=7, decimal_places=1, default=Decimal("0.0"),
+        verbose_name="Desconto real (%)",
+    )
+
     # ── Comissão apurada no fechamento da venda ───────────────────────────────
     # Gravada pelo motor de margem (sales.margin) quando o orçamento vira venda.
     # Os relatórios apenas SOMAM estes campos — não recalculam — para não
@@ -685,6 +699,39 @@ class Quote(models.Model):
             if cash_total is not None:
                 return cash_total
         return self.calculate_rounded_total()
+
+    def calculate_list_value(self, tier: str | None = None) -> Decimal:
+        """Valor de tabela: itens da modalidade + frete repassado ao cliente."""
+        return self.calculate_subtotal_for_tier(tier) + self.billable_freight
+
+    def calculate_real_gap(
+        self,
+        tier: str | None = None,
+        total: Decimal | None = None,
+    ) -> tuple[Decimal, Decimal]:
+        """Desconto real do orçamento, em (R$, %): valor de tabela − total pago.
+
+        Positivo é desconto, negativo é acréscimo. O % usa como base o subtotal
+        dos itens — a mesma base da barrinha — para os dois números conversarem.
+        O Ajuste de Preço (markup) fica fora da referência, então abate o
+        desconto: o que conta é o que o cliente paga contra o preço dos itens,
+        seja o total vindo de percentuais ou de um preço final digitado.
+
+        `total` evita recalcular quando o chamador já tem o total da mesma
+        modalidade. Sem itens não há referência: devolve zero.
+        """
+        subtotal = self.calculate_subtotal_for_tier(tier)
+        if subtotal <= 0:
+            return Decimal("0.00"), Decimal("0.0")
+        if total is None:
+            total = self.calculate_total_for_tier(tier)
+        gap = (subtotal + self.billable_freight - total).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+        pct = (gap / subtotal * Decimal("100")).quantize(
+            Decimal("0.1"), rounding=ROUND_HALF_UP
+        )
+        return gap, pct
 
     def get_payment_plans(self) -> list[dict]:
         """Opções de pagamento persistidas, uma por modalidade oferecida."""
@@ -998,8 +1045,12 @@ def _refresh_quote_snapshot(quote_id: int) -> None:
     """
     try:
         quote = Quote.objects.prefetch_related('items').get(pk=quote_id)
+        total = quote.calculate_total_for_tier()
+        real_gap, real_pct = quote.calculate_real_gap(total=total)
         Quote.objects.filter(pk=quote_id).update(
-            total_value_snapshot=quote.calculate_total_for_tier()
+            total_value_snapshot=total,
+            real_discount_snapshot=real_gap,
+            real_discount_pct_snapshot=real_pct,
         )
     except Quote.DoesNotExist:
         pass
@@ -1018,7 +1069,9 @@ def _on_quote_item_delete(sender, instance, **kwargs):
 @receiver(post_save, sender=Quote)
 def _on_quote_save(sender, instance, update_fields=None, **kwargs):
     # Skip if this save was triggered by _refresh_quote_snapshot itself
-    if update_fields is not None and set(update_fields) == {'total_value_snapshot'}:
+    if update_fields is not None and set(update_fields) <= {
+        'total_value_snapshot', 'real_discount_snapshot', 'real_discount_pct_snapshot',
+    }:
         return
     # Only recalculate when financially relevant fields may have changed
     # (runs on every save except snapshot-only saves to stay safe)

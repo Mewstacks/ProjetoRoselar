@@ -1749,3 +1749,426 @@ class CashPriceTests(TestCase):
         self.assertIn("À vista", texto)
         self.assertIn("R$ 2.375,00", texto)
         self.assertIn("O B S E R V A", texto)
+
+
+class PrecoFinalFluxoTests(TestCase):
+    """Fluxo da dona: cadeira + mesa somam R$ 1.000 e o vendedor digita o preço.
+
+    Percorre formulário → gravação → detalhe → simulador → PDF do cliente para
+    provar que o preço final digitado (a prazo e à vista), maior ou menor que a
+    soma dos itens, é o valor que cada tela e o PDF assumem — nunca a soma.
+    """
+
+    def setUp(self):
+        from core.models import Customer, PaymentTariff
+
+        PaymentTariff.objects.all().delete()
+        PaymentTariff.objects.create(payment_type="PIX", installments=1,
+                                     fee_percent=Decimal("0.00"))
+        self.seller = User.objects.create_user(
+            username="v-final", password="x", role="SELLER"
+        )
+        self.customer = Customer.objects.create(name="Cliente Final")
+        self.supplier = Supplier.objects.create(name="Fornecedor Final")
+        self.client.force_login(self.seller)
+
+    def _payload(self, final_price, cash_price="", item_ids=None):
+        payload = {
+            "submission_token": str(uuid4()),
+            "action": "save",
+            "customer": self.customer.id,
+            "quote_date": "2026-10-26",
+            "sale_date": "",
+            "delivery_days_min": "",
+            "delivery_days_max": "",
+            "freight_value": "0.00",
+            "freight_responsible": "CUSTOMER",
+            "shipping_company": "",
+            "discount_percent": "0",
+            "has_architect": "",
+            "architect": "",
+            "payment_type": "PIX",
+            "payment_installments": "1",
+            "payment_fee_percent": "0",
+            "total_override": final_price,
+            "total_cash_override": cash_price,
+            "dual_pricing": "",
+            "selected_price_tier": PriceTier.RETAIL,
+            "notes": "",
+            "items-TOTAL_FORMS": "2",
+            "items-INITIAL_FORMS": "2" if item_ids else "0",
+            "items-MIN_NUM_FORMS": "0",
+            "items-MAX_NUM_FORMS": "1000",
+        }
+        for index, (nome, valor) in enumerate((("Cadeira", "400.00"), ("Mesa", "600.00"))):
+            payload.update({
+                f"items-{index}-supplier": self.supplier.id,
+                f"items-{index}-environment": "Sala",
+                f"items-{index}-product_name": nome,
+                f"items-{index}-description": "",
+                f"items-{index}-quantity": "1",
+                f"items-{index}-unit_value": valor,
+                f"items-{index}-unit_value_wholesale": "",
+                f"items-{index}-architect_percent": "0",
+            })
+            if item_ids:
+                payload[f"items-{index}-id"] = item_ids[index]
+        return payload
+
+    def _create(self, final_price, cash_price=""):
+        response = self.client.post(
+            reverse("sales:quote_create"), self._payload(final_price, cash_price)
+        )
+        self.assertEqual(response.status_code, 302)
+        return Quote.objects.get()
+
+    def _pdf_text(self, quote):
+        from pypdf import PdfReader
+
+        resp = self.client.get(reverse("sales:quote_pdf_client", args=[quote.id]))
+        self.assertEqual(resp.status_code, 200)
+        return "\n".join(
+            page.extract_text() or ""
+            for page in PdfReader(BytesIO(resp.content)).pages
+        )
+
+    def _assert_preco_manda(self, quote, a_prazo, a_vista):
+        # Gravação: o que foi digitado é o que ficou.
+        self.assertEqual(quote.total_override, a_prazo)
+        self.assertEqual(quote.total_cash_override, a_vista)
+        self.assertEqual(quote.calculate_subtotal(), Decimal("1000.00"))
+        self.assertEqual(quote.calculate_rounded_total(), a_prazo)
+        self.assertEqual(quote.calculate_rounded_total_cash(), a_vista)
+        self.assertEqual(quote.total_value_snapshot, a_prazo)
+
+        # Detalhe: o total mostrado é o preço digitado, não a soma dos itens.
+        detail = self.client.get(reverse("sales:quote_detail", args=[quote.id]))
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.context["value_breakdown"]["rounded_total"], a_prazo)
+        self.assertEqual(detail.context["value_breakdown"]["cash_total"], a_vista)
+
+        # Simulador: o total para o cliente é o preço digitado.
+        sim = self.client.get(reverse("sales:quote_simulate", args=[quote.id]))
+        self.assertEqual(sim.status_code, 200)
+        self.assertTrue(sim.context["total_override_active"])
+        self.assertEqual(sim.context["final_total"], a_prazo)
+
+        # PDF do cliente: as duas condições digitadas, não a soma dos itens.
+        texto = self._pdf_text(quote)
+        self.assertIn("A prazo", texto)
+        self.assertIn("À vista", texto)
+        self.assertIn(self._brl(a_prazo), texto)
+        self.assertIn(self._brl(a_vista), texto)
+
+    @staticmethod
+    def _brl(value):
+        inteiro, centavos = f"{value:.2f}".split(".")
+        milhar = f"{int(inteiro):,}".replace(",", ".")
+        return f"R$ {milhar},{centavos}"
+
+    def test_preco_final_maior_que_os_itens_manda_em_todas_as_telas(self):
+        quote = self._create("1.100,00", "1.050,00")
+        self._assert_preco_manda(quote, Decimal("1100.00"), Decimal("1050.00"))
+
+    def test_preco_final_menor_que_os_itens_manda_em_todas_as_telas(self):
+        quote = self._create("900,00", "850,00")
+        self._assert_preco_manda(quote, Decimal("900.00"), Decimal("850.00"))
+
+    def test_so_a_prazo_digitado_nao_vira_a_soma_dos_itens(self):
+        quote = self._create("1.100,00")
+        self.assertEqual(quote.calculate_rounded_total(), Decimal("1100.00"))
+        self.assertIsNone(quote.calculate_rounded_total_cash())
+        self.assertEqual(quote.total_value_snapshot, Decimal("1100.00"))
+
+    def test_voltar_e_salvar_de_novo_mantem_o_preco_final(self):
+        """Tela de edição devolve o valor no campo e o reenvio não o perde."""
+        quote = self._create("1.100,00", "1.050,00")
+        item_ids = list(quote.items.order_by("id").values_list("id", flat=True))
+
+        edit = self.client.get(reverse("sales:quote_edit", args=[quote.id]))
+        self.assertEqual(edit.status_code, 200)
+        self.assertContains(edit, 'value="1100.00"')
+        self.assertContains(edit, 'value="1050.00"')
+
+        response = self.client.post(
+            reverse("sales:quote_edit", args=[quote.id]),
+            self._payload("1.100,00", "1.050,00", item_ids=item_ids),
+        )
+        self.assertEqual(response.status_code, 302)
+        quote.refresh_from_db()
+        self.assertEqual(quote.calculate_rounded_total(), Decimal("1100.00"))
+        self.assertEqual(quote.calculate_rounded_total_cash(), Decimal("1050.00"))
+
+    def test_barrinha_no_simulador_nao_muda_o_preco_final(self):
+        quote = self._create("1.100,00", "1.050,00")
+
+        sim = self.client.post(
+            reverse("sales:quote_simulate", args=[quote.id]),
+            {
+                "_ajax": "1",
+                "discount_percent": "30.0",
+                "price_increase_percent": "0.0",
+                "sim_installments": "1",
+                "sim_payment_type": "PIX",
+            },
+        )
+        self.assertEqual(sim.status_code, 200)
+        self.assertEqual(sim.context["final_total"], Decimal("1100.00"))
+
+    def test_pdf_com_preco_final_ignora_a_barrinha_gravada(self):
+        """Barrinha esquecida em 5% não pode virar 'valor sem desconto' no PDF."""
+        quote = self._create("1.100,00", "1.050,00")
+        Quote.objects.filter(pk=quote.pk).update(discount_percent=Decimal("5.0"))
+
+        texto = self._pdf_text(quote)
+
+        self.assertNotIn("sem desconto", texto)
+        self.assertNotIn("com desconto", texto)
+        self.assertIn("R$ 1.100,00", texto)
+        self.assertIn("R$ 1.050,00", texto)
+
+    def test_pdf_sem_preco_final_mantem_o_desconto_da_barrinha(self):
+        quote = self._create("", "")
+        Quote.objects.filter(pk=quote.pk).update(discount_percent=Decimal("10.0"))
+
+        texto = self._pdf_text(quote)
+
+        self.assertIn("Valor sem desconto", texto)
+        self.assertIn("com desconto", texto)
+        self.assertIn("R$ 900,00", texto)
+
+
+class DescontoRealTests(TestCase):
+    """Desconto real = valor de tabela (itens + frete repassado) − total pago.
+
+    A barrinha (discount_percent) é entrada; com preço final digitado ela não
+    diz quanto foi dado. O desconto real sai dos totais e fica no snapshot que
+    os relatórios leem.
+    """
+
+    def setUp(self):
+        from core.models import Customer, PaymentTariff
+
+        PaymentTariff.objects.all().delete()
+        PaymentTariff.objects.create(payment_type="PIX", installments=1,
+                                     fee_percent=Decimal("0.00"))
+        self.seller = User.objects.create_user(
+            username="v-real", password="x", role="SELLER"
+        )
+        cust = Customer.objects.create(name="Cliente Real")
+        self.quote = Quote.objects.create(
+            number="ORC-9500", customer=cust, seller=self.seller,
+            status=QuoteStatus.DRAFT, freight_responsible="CUSTOMER",
+            payment_type="PIX", payment_installments=1,
+        )
+        self.quote.items.create(product_name="Cadeira", quantity=1,
+                                unit_value=Decimal("400.00"))
+        self.quote.items.create(product_name="Mesa", quantity=1,
+                                unit_value=Decimal("600.00"))
+        self.quote.refresh_from_db()
+
+    def _set(self, **fields):
+        for name, value in fields.items():
+            setattr(self.quote, name, value)
+        self.quote.save()
+        self.quote.refresh_from_db()
+
+    def test_sem_ajuste_nenhum_nao_ha_desconto(self):
+        self.assertEqual(self.quote.calculate_real_gap(),
+                         (Decimal("0.00"), Decimal("0.0")))
+        self.assertEqual(self.quote.real_discount_snapshot, Decimal("0.00"))
+
+    def test_preco_final_menor_e_desconto_real(self):
+        self._set(total_override=Decimal("900.00"))
+        self.assertEqual(self.quote.calculate_real_gap(),
+                         (Decimal("100.00"), Decimal("10.0")))
+        self.assertEqual(self.quote.real_discount_snapshot, Decimal("100.00"))
+        self.assertEqual(self.quote.real_discount_pct_snapshot, Decimal("10.0"))
+
+    def test_preco_final_maior_e_acrescimo_real(self):
+        self._set(total_override=Decimal("1100.00"))
+        self.assertEqual(self.quote.calculate_real_gap(),
+                         (Decimal("-100.00"), Decimal("-10.0")))
+        self.assertEqual(self.quote.real_discount_snapshot, Decimal("-100.00"))
+        self.assertEqual(self.quote.real_discount_pct_snapshot, Decimal("-10.0"))
+
+    def test_barrinha_sem_preco_final_e_o_desconto_real(self):
+        self._set(discount_percent=Decimal("10.0"))
+        self.assertEqual(self.quote.calculate_real_gap(),
+                         (Decimal("100.00"), Decimal("10.0")))
+
+    def test_preco_final_vence_a_barrinha_gravada(self):
+        self._set(discount_percent=Decimal("30.0"),
+                  total_override=Decimal("1100.00"))
+        self.assertEqual(self.quote.calculate_real_gap(),
+                         (Decimal("-100.00"), Decimal("-10.0")))
+
+    def test_ajuste_de_preco_abate_o_desconto(self):
+        self._set(discount_percent=Decimal("5.0"),
+                  price_increase_percent=Decimal("3.0"))
+        self.assertEqual(self.quote.calculate_real_gap(),
+                         (Decimal("20.00"), Decimal("2.0")))
+
+    def test_frete_repassado_entra_na_tabela_e_no_total(self):
+        self._set(freight_responsible="CARRIER", freight_value=Decimal("100.00"),
+                  total_override=Decimal("1000.00"))
+        # tabela 1.000 + frete 100 = 1.100 contra preço final 1.000
+        self.assertEqual(self.quote.calculate_real_gap(),
+                         (Decimal("100.00"), Decimal("10.0")))
+
+    def test_frete_por_conta_da_loja_fica_fora_da_conta(self):
+        self._set(freight_responsible="STORE", freight_value=Decimal("100.00"),
+                  total_override=Decimal("900.00"))
+        self.assertEqual(self.quote.calculate_real_gap(),
+                         (Decimal("100.00"), Decimal("10.0")))
+
+    def test_vendido_a_vista_usa_o_preco_a_vista(self):
+        from sales.models import PaymentTerms
+
+        self._set(total_override=Decimal("1000.00"),
+                  total_cash_override=Decimal("900.00"),
+                  selected_payment_terms=PaymentTerms.CASH)
+        self.assertEqual(self.quote.calculate_real_gap(),
+                         (Decimal("100.00"), Decimal("10.0")))
+        self.assertEqual(self.quote.real_discount_snapshot, Decimal("100.00"))
+
+    def test_atacado_ignora_preco_final_e_barrinha(self):
+        self._set(dual_pricing=True, selected_price_tier=PriceTier.WHOLESALE,
+                  total_override=Decimal("500.00"),
+                  discount_percent=Decimal("20.0"),
+                  price_increase_percent=Decimal("5.0"))
+        # Só o ajuste de 5% sobre 1.000 conta: acréscimo, nunca desconto.
+        self.assertEqual(self.quote.calculate_real_gap(),
+                         (Decimal("-50.00"), Decimal("-5.0")))
+
+    def test_sem_itens_nao_ha_referencia(self):
+        self.quote.items.all().delete()
+        self._set(total_override=Decimal("1100.00"))
+        self.assertEqual(self.quote.calculate_real_gap(),
+                         (Decimal("0.00"), Decimal("0.0")))
+        self.assertEqual(self.quote.real_discount_snapshot, Decimal("0.00"))
+
+    def test_backfill_preenche_o_historico(self):
+        import importlib
+
+        backfill = importlib.import_module(
+            "sales.migrations.0037_backfill_real_discount_snapshot"
+        )
+        # .update() não dispara signals: o snapshot fica velho, como no histórico.
+        Quote.objects.filter(pk=self.quote.pk).update(total_override=Decimal("900.00"))
+        self.quote.refresh_from_db()
+        self.assertEqual(self.quote.real_discount_snapshot, Decimal("0.00"))
+
+        backfill.backfill_real_discount(None, None)
+
+        self.quote.refresh_from_db()
+        self.assertEqual(self.quote.real_discount_snapshot, Decimal("100.00"))
+        self.assertEqual(self.quote.real_discount_pct_snapshot, Decimal("10.0"))
+
+    def test_detalhe_mostra_o_desconto_real_e_nao_a_barrinha(self):
+        self._set(total_override=Decimal("900.00"),
+                  discount_percent=Decimal("5.0"))
+        self.client.force_login(self.seller)
+
+        resp = self.client.get(reverse("sales:quote_detail", args=[self.quote.id]))
+
+        breakdown = resp.context["value_breakdown"]
+        self.assertTrue(breakdown["has_override"])
+        self.assertFalse(breakdown["has_discount"])
+        self.assertTrue(breakdown["is_real_discount"])
+        self.assertEqual(breakdown["real_gap"], Decimal("100.00"))
+        self.assertEqual(breakdown["real_pct"], Decimal("10.0"))
+        self.assertEqual(breakdown["total_with_discount"], Decimal("1000.00"))
+        self.assertContains(resp, "Desconto real")
+
+
+class SimuladorTravadoTests(TestCase):
+    """Com preço final digitado a barrinha e o Ajuste de Preço ficam travados."""
+
+    def setUp(self):
+        from core.models import Customer, PaymentTariff
+
+        PaymentTariff.objects.all().delete()
+        PaymentTariff.objects.create(payment_type="PIX", installments=1,
+                                     fee_percent=Decimal("0.00"))
+        self.seller = User.objects.create_user(
+            username="v-trava", password="x", role="SELLER"
+        )
+        cust = Customer.objects.create(name="Cliente Trava")
+        self.quote = Quote.objects.create(
+            number="ORC-9600", customer=cust, seller=self.seller,
+            status=QuoteStatus.DRAFT, freight_responsible="CUSTOMER",
+            payment_type="PIX", payment_installments=1,
+            discount_percent=Decimal("5.0"),
+        )
+        self.quote.items.create(product_name="Mesa", quantity=1,
+                                unit_value=Decimal("1000.00"))
+        self.client.force_login(self.seller)
+        self.url = reverse("sales:quote_simulate", args=[self.quote.id])
+
+    def _set_override(self, value):
+        self.quote.total_override = value
+        self.quote.save()
+        self.quote.refresh_from_db()
+
+    def test_com_preco_final_os_controles_vem_desligados_e_mostram_o_real(self):
+        self._set_override(Decimal("1100.00"))
+
+        resp = self.client.get(self.url)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, '<fieldset class="lock-set" disabled>', count=2)
+        self.assertContains(resp, "Editar preço")
+        self.assertContains(resp, "Acréscimo real")
+        self.assertNotContains(resp, "Total antes do desconto")
+        self.assertTrue(resp.context["real_is_increase"])
+        self.assertEqual(resp.context["real_gap"], Decimal("-100.00"))
+        self.assertEqual(resp.context["real_pct"], Decimal("-10.0"))
+
+    def test_preco_final_menor_mostra_desconto_real(self):
+        self._set_override(Decimal("900.00"))
+
+        resp = self.client.get(self.url)
+
+        self.assertContains(resp, "Desconto real")
+        self.assertFalse(resp.context["real_is_increase"])
+        self.assertEqual(resp.context["real_gap"], Decimal("100.00"))
+        self.assertEqual(resp.context["real_pct"], Decimal("10.0"))
+
+    def test_sem_preco_final_a_barrinha_continua_livre(self):
+        resp = self.client.get(self.url)
+
+        self.assertContains(resp, '<fieldset class="lock-set">', count=2)
+        self.assertNotContains(resp, "Editar preço")
+        self.assertContains(resp, "Total antes do desconto")
+        self.assertFalse(resp.context["total_override_active"])
+
+    def test_post_nao_muda_o_que_a_barrinha_gravou(self):
+        self._set_override(Decimal("1100.00"))
+
+        resp = self.client.post(self.url, {
+            "action": "save_conditions",
+            "discount_percent": "30.0",
+            "price_increase_percent": "10.0",
+            "sim_installments": "1",
+            "sim_payment_type": "PIX",
+        })
+
+        self.assertEqual(resp.status_code, 302)
+        self.quote.refresh_from_db()
+        self.assertEqual(self.quote.discount_percent, Decimal("5.0"))
+        self.assertEqual(self.quote.price_increase_percent, Decimal("0.0"))
+        self.assertEqual(self.quote.calculate_rounded_total(), Decimal("1100.00"))
+
+    def test_post_sem_preco_final_ainda_grava_a_barrinha(self):
+        resp = self.client.post(self.url, {
+            "action": "save_conditions",
+            "discount_percent": "12.0",
+            "price_increase_percent": "0.0",
+            "sim_installments": "1",
+            "sim_payment_type": "PIX",
+        })
+
+        self.assertEqual(resp.status_code, 302)
+        self.quote.refresh_from_db()
+        self.assertEqual(self.quote.discount_percent, Decimal("12.0"))

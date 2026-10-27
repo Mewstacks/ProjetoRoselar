@@ -47,7 +47,7 @@
         </div>
 
         <div class="row g-3 mb-4">
-          <div class="col-md-4"><div class="bg-white border p-3 text-center" style="border-radius:8px;"><div style="font-size:.75rem;color:#6c757d;text-transform:uppercase;font-weight:600;">Desconto Médio</div><div class="fw-bold fs-4" style="color:#ffc107;">{{ avg_discount }}%</div></div></div>
+          <div class="col-md-4"><div class="bg-white border p-3 text-center" style="border-radius:8px;"><div style="font-size:.75rem;color:#6c757d;text-transform:uppercase;font-weight:600;">Desconto Médio</div><div class="fw-bold fs-4" style="color:var(--brand);">{{ avg_discount }}%</div></div></div>
           <div class="col-md-4"><div class="bg-white border p-3 text-center" style="border-radius:8px;"><div style="font-size:.75rem;color:#6c757d;text-transform:uppercase;font-weight:600;">Com Desconto</div><div class="fw-bold fs-4" style="color:var(--brand);">{{ total_count }}</div></div></div>
           <div class="col-md-4"><div class="bg-white border p-3 text-center" style="border-radius:8px;"><div style="font-size:.75rem;color:#6c757d;text-transform:uppercase;font-weight:600;">Autorizados</div><div class="fw-bold fs-4" style="color:var(--brand);">{{ authorized_count }}</div></div></div>
         </div>
@@ -55,19 +55,20 @@
         <div class="bg-white shadow-sm" style="border-radius:8px;overflow:hidden;">
           <div class="table-responsive">
             <table class="table table-hover mb-0" style="font-size:.85rem;">
-              <thead style="background:var(--brand);color:#fff;"><tr><th>Nº</th><th>Cliente</th><th>Vendedor</th><th>Desconto</th><th>Autorizado por</th><th class="text-end">Total</th></tr></thead>
+              <thead style="background:var(--brand);color:#fff;"><tr><th>Nº</th><th>Cliente</th><th>Vendedor</th><th>Desconto</th><th class="text-end">Valor</th><th>Autorizado por</th><th class="text-end">Total</th></tr></thead>
               <tbody>
                 {% for q in quotes %}
                 <tr>
                   <td>{{ q.number }}</td>
                   <td>{{ q.customer.name|truncatechars:30 }}</td>
                   <td>{{ q.seller.username }}</td>
-                  <td class="fw-bold" style="color:#ffc107;">{{ q.discount_percent }}%</td>
+                  <td class="fw-bold" style="color:var(--brand);">{{ q.real_discount_pct_snapshot }}%</td>
+                  <td class="text-end">R$ {{ q.real_discount_snapshot|floatformat:2 }}</td>
                   <td>{% if q.discount_authorized_by %}{{ q.discount_authorized_by.username }}{% else %}<span class="text-muted">-</span>{% endif %}</td>
                   <td class="text-end">R$ {{ q.total_value_snapshot|floatformat:2 }}</td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="6" class="text-center text-muted py-4">Nenhum desconto encontrado. <a href="{{ prev_cycle_qs }}" class="fw-bold text-decoration-underline" style="color:var(--brand);">Ver {{ prev_cycle_label }}</a></td></tr>
+                <tr><td colspan="7" class="text-center text-muted py-4">Nenhum desconto encontrado. <a href="{{ prev_cycle_qs }}" class="fw-bold text-decoration-underline" style="color:var(--brand);">Ver {{ prev_cycle_label }}</a></td></tr>
                 {% endfor %}
               </tbody>
             </table>
