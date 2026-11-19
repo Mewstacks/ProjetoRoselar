@@ -14,10 +14,12 @@
   <style>:root{--brand:#111418;}body{font-variant-numeric:tabular-nums;font-family:'Manrope',sans-serif;}input::placeholder,textarea::placeholder{color:#565C66;opacity:1;}</style>
 </head>
 <body>
-  <main class="main" id="top">
+  <a class="visually-hidden-focusable position-absolute top-0 start-0 m-2 bg-white text-dark p-2" href="#report-content">Pular para o conteúdo</a>
+  <main class="main" id="report-content" tabindex="-1">
     <nav class="navbar navbar-expand-lg fixed-top navbar-dark" data-navbar-on-scroll="data-navbar-on-scroll">
       <div class="container">
-        <a class="navbar-brand" href="{% url 'core:index' %}"><img src="{% static 'assets/img/Logo.png' %}?v=2" alt="Roselar — Início" style="height:40px;"></a>
+        <a class="navbar-brand" href="{% url 'core:index' %}"><img src="{% static 'assets/img/Logo.png' %}?v=2" alt="Roselar — Início" width="133" height="40"></a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Abrir navegação"><i class="fa-solid fa-bars text-white fs-3" aria-hidden="true"></i></button>
         <div class="collapse navbar-collapse" id="navbarSupportedContent">
           <ul class="navbar-nav ms-auto align-items-center">
             <li class="nav-item"><a class="nav-link" href="{% url 'core:dashboard' %}">Dashboard</a></li>
@@ -41,7 +43,7 @@
           <form method="get" class="d-flex gap-2 align-items-end flex-wrap">
             {% include "core/_period_filter.html" %}
             <div><label for="sold_only" class="form-label small fw-bold mb-0">Base</label><select id="sold_only" name="sold_only" class="form-control form-control-sm"><option value="1" {% if sold_only %}selected{% endif %}>Somente vendas</option><option value="0" {% if not sold_only %}selected{% endif %}>Todos os orçamentos</option></select></div>
-            <button type="submit" class="btn btn-primary btn-sm"><i class="fa-solid fa-search me-1"></i>Filtrar</button>
+            <button type="submit" class="btn btn-dark btn-sm"><i class="fa-solid fa-search me-1"></i>Filtrar</button>
           </form>
           <p class="small text-muted mt-2 mb-0">Período filtrado pela <strong>{{ date_basis }}</strong>. Orçamentos cancelados nunca entram na apuração.</p>
         </div>
@@ -63,9 +65,9 @@
                   <td>{{ q.customer.name|truncatechars:30 }}</td>
                   <td>{{ q.seller.username }}</td>
                   <td class="fw-bold" style="color:var(--brand);">{{ q.real_discount_pct_snapshot }}%</td>
-                  <td class="text-end">R$ {{ q.real_discount_snapshot|floatformat:2 }}</td>
+                  <td class="text-end">R$ {{ q.real_discount_snapshot|floatformat:'2g' }}</td>
                   <td>{% if q.discount_authorized_by %}{{ q.discount_authorized_by.username }}{% else %}<span class="text-muted">-</span>{% endif %}</td>
-                  <td class="text-end">R$ {{ q.total_value_snapshot|floatformat:2 }}</td>
+                  <td class="text-end">R$ {{ q.total_value_snapshot|floatformat:'2g' }}</td>
                 </tr>
                 {% empty %}
                 <tr><td colspan="7" class="text-center text-muted py-4">Nenhum desconto encontrado. <a href="{{ prev_cycle_qs }}" class="fw-bold text-decoration-underline" style="color:var(--brand);">Ver {{ prev_cycle_label }}</a></td></tr>

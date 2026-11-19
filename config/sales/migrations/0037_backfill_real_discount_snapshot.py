@@ -25,6 +25,7 @@ def backfill_real_discount(apps, schema_editor):
     quotes = (
         Quote.objects.only(
             "id",
+            "status",
             "dual_pricing",
             "selected_price_tier",
             "selected_payment_terms",

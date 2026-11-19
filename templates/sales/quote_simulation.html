@@ -184,11 +184,16 @@
       background: transparent;
     }
     .pct-input:focus { outline: none; }
-    /* Controle desligado (atacado ou preço final digitado): some o convite ao clique. */
+    /* Controle desligado (atacado): some o convite ao clique. */
     .pct-btn:disabled, .pct-input:disabled, input[type=range]:disabled { opacity: .5; cursor: not-allowed; }
     input[type=range]:disabled::-webkit-slider-thumb { transform: none; cursor: not-allowed; }
     input[type=range]:disabled::-moz-range-thumb { cursor: not-allowed; }
     .lock-set { border: 0; padding: 0; margin: 0; min-width: 0; }
+    /* Preço final digitado: a barrinha e o Ajuste de Preço gravados não valem mais.
+       O fieldset fica no DOM (doSubmit lê .value) mas sai da tela; travado e visível
+       mostraria um número fora de vigor ao lado do desconto real, a mesma dúvida que
+       a dona pediu para acabar. */
+    .lock-set:disabled { display: none; }
     .lock-row {
       display: flex; align-items: center; justify-content: space-between;
       flex-wrap: wrap; gap: .5rem; margin-bottom: .65rem;
@@ -408,6 +413,16 @@
         </div>
       </div>
 
+      {% if messages %}
+        {% for message in messages %}
+          <div class="fi" role="alert"
+               style="margin-bottom:1rem;padding:.75rem 1rem;border:1px solid {% if message.tags == 'danger' %}var(--red){% else %}var(--border){% endif %};background:{% if message.tags == 'danger' %}#fff3f3{% else %}var(--surface){% endif %};color:var(--brand);border-radius:8px;font-size:.86rem;font-weight:600;">
+            {% if message.tags == 'danger' %}<i class="fa-solid fa-triangle-exclamation me-2" aria-hidden="true"></i>{% endif %}
+            {{ message }}
+          </div>
+        {% endfor %}
+      {% endif %}
+
       <!-- ═══ FORM ═══ -->
       <form method="post" id="sim-form">
         {% csrf_token %}
@@ -422,7 +437,7 @@
         <input type="hidden" name="sim_installments_2"     id="h-installments2">
         <input type="hidden" name="sim_split_amount"       id="h-split-amount">
         <input type="hidden" name="price_increase_percent_2" id="h-price-inc-2" value="{{ price_increase_pct_2|default:'0' }}">
-        <input type="hidden" name="down_payment_value"      id="h-down-payment">
+        <input type="hidden" name="down_payment_value"      id="h-down-payment" form="save-form">
         <input type="hidden" name="freight_commission_deduction" id="h-freight-commission">
         <input type="hidden" name="manual_fee_percent"      id="h-manual-fee">
         <input type="hidden" name="manual_fee_percent_2"    id="h-manual-fee-2">

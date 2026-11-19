@@ -23,17 +23,27 @@
     :root { --brand: #111418; --green: #198754; --red: #D32F2F; --muted: #6c757d; }
     body { font-variant-numeric: tabular-nums; font-family: 'Manrope', sans-serif; }
     input::placeholder, textarea::placeholder { color: #565C66; opacity: 1; }
-    .metric-card { background: #fff; border: 1px solid #dee2e6; padding: 1.25rem; transition: box-shadow .2s; border-radius: 8px; }
-    .metric-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.08); }
+    .metric-card { background: #fff; border: 1px solid #dee2e6; padding: 1.25rem; border-radius: 10px; min-height: 125px; height: 100%; }
     .metric-card .label { font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; margin-bottom: .25rem; }
-    .metric-card .value { font-size: 1.5rem; font-weight: 700; color: var(--brand); }
-    .metric-card .value.green { color: var(--green); }
-    .metric-card .value.red { color: var(--red); }
-    .section-header { background: var(--brand); color: #fff; padding: .6rem 1rem; font-weight: 600; font-size: .9rem; margin-bottom: 0; border-radius: 8px 8px 0 0; }
-    .section-body { border: 1px solid #dee2e6; border-top: none; padding: 1rem; background: #fff; margin-bottom: 1.5rem; border-radius: 0 0 8px 8px; }
+    .metric-card .value { font-size: 1.5rem; font-weight: 800; color: var(--brand); overflow-wrap: anywhere; }
+    .section-body .metric-card { min-height: 0; }
+    .section-header { background: #fff; color: var(--brand); padding: .85rem 1.1rem; font-weight: 700; font-size: .9rem; margin-bottom: 0; border: 1px solid #dee2e6; border-bottom: none; border-radius: 10px 10px 0 0; }
+    .section-body { border: 1px solid #dee2e6; padding: 1.1rem; background: #fff; margin-bottom: 1.5rem; border-radius: 0 0 10px 10px; }
     .goal-bar { height: 22px; background: #e9ecef; position: relative; border-radius: 4px; overflow: hidden; }
     .goal-bar .fill { height: 100%; background: var(--green); }
     .goal-bar .pct { position: absolute; right: 8px; top: 1px; font-size: .75rem; font-weight: 700; color: var(--brand); }
+    .dashboard-header { border: 1px solid #dee2e6; border-radius: 10px; }
+    .dashboard-cycle { display: flex; align-items: end; gap: .5rem; flex-wrap: wrap; }
+    .dashboard-cycle label { display: block; font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; margin-bottom: .3rem; }
+    .dashboard-cycle .form-select { min-width: 170px; min-height: 42px; border-radius: 8px; }
+    .dashboard-cycle .btn { min-height: 42px; }
+    .dashboard-period { color: #565c66; font-size: .86rem; }
+    .dashboard-empty { color: #565c66; font-size: .86rem; line-height: 1.5; }
+    .pending-mobile { display: none; }
+    .pending-mobile a { display: flex; justify-content: space-between; gap: .75rem; padding: .7rem 0; color: var(--brand); border-bottom: 1px solid #e9ecef; text-decoration: none; }
+    .pending-mobile a:last-child { border-bottom: 0; }
+    .pending-mobile strong { display: block; font-size: .86rem; }
+    .pending-mobile small { color: #565c66; }
     .mini-table { width: 100%; font-size: .85rem; border-collapse: collapse; }
     .mini-table th, .mini-table td { padding: .4rem .6rem; border-bottom: 1px solid #eee; }
     .mini-table th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: .72rem; }
@@ -47,16 +57,20 @@
       .mini-table { font-size: .78rem; }
       .mini-table th, .mini-table td { padding: .3rem .45rem; }
       .metric-card { padding: 1rem; }
-      .metric-card .value { font-size: 1.25rem; }
+      .metric-card .value { font-size: 1.15rem; }
+      .dashboard-cycle, .dashboard-cycle>div, .dashboard-cycle .form-select { width: 100%; }
+      .pending-desktop { display: none; }
+      .pending-mobile { display: block; }
     }
   </style>
 </head>
 <body>
+  <a class="visually-hidden-focusable position-absolute top-0 start-0 m-2 bg-white text-dark p-2" href="#dashboard-content">Pular para o conteúdo</a>
   <main class="main" id="top">
     <nav class="navbar navbar-expand-lg fixed-top navbar-dark" data-navbar-on-scroll="data-navbar-on-scroll">
       <div class="container">
-        <a class="navbar-brand" href="{% url 'core:index' %}"><img src="{% static 'assets/img/Logo.png' %}?v=2" alt="Roselar — Início" style="height: 40px;"></a>
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent"><i class="fa-solid fa-bars text-white fs-3"></i></button>
+        <a class="navbar-brand" href="{% url 'core:index' %}"><img src="{% static 'assets/img/Logo.png' %}?v=2" alt="Roselar — Início" width="133" height="40"></a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Abrir navegação"><i class="fa-solid fa-bars text-white fs-3" aria-hidden="true"></i></button>
         <div class="collapse navbar-collapse" id="navbarSupportedContent">
           <ul class="navbar-nav ms-auto align-items-center">
             <li class="nav-item"><a class="nav-link" href="{% url 'core:index' %}">Início</a></li>
@@ -93,45 +107,51 @@
       </div>
     </nav>
 
-    <section class="py-5" style="min-height: 100vh;">
-      <div style="position: absolute; top: 0; left: 0; right: 0; height: 30vh; background: var(--brand); z-index: -1;"></div>
+    <section class="py-5" id="dashboard-content" tabindex="-1" style="min-height: 100vh; background:#f4f6f9;">
       <div class="container" style="margin-top: 80px;">
-        {% if messages %}{% for message in messages %}<div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">{{ message }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{% endfor %}{% endif %}
+        {% if messages %}{% for message in messages %}<div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">{{ message }}<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fechar mensagem"></button></div>{% endfor %}{% endif %}
 
-        <div class="bg-white p-4 shadow-sm mb-4" style="border-radius:8px;">
+        <div class="bg-white p-4 mb-4 dashboard-header">
           <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-            <div><h1 class="h4 fw-bold mb-1" style="color: var(--brand);"><i class="fa-solid fa-chart-line me-2"></i>Dashboard</h1><span style="color: var(--muted);">Bem-vindo, {{ user.username }}! Hoje é {{ today|date:"d/m/Y" }}</span></div>
+            <div><h1 class="h4 fw-bold mb-1" style="color: var(--brand);">Meu painel</h1><p class="dashboard-period mb-0">Ciclo de {{ cycle_start|date:"d/m/Y" }} a {{ cycle_end|date:"d/m/Y" }} · vendas pela data da venda</p></div>
             <div class="d-flex gap-2">
               <a href="{% url 'sales:quote_create' %}" class="btn btn-success btn-sm"><i class="fa-solid fa-plus me-1"></i>Novo Orçamento</a>
               <a href="{% url 'calendar_app:calendar' %}" class="btn btn-outline-dark btn-sm"><i class="fa-solid fa-calendar me-1"></i>Calendário</a>
             </div>
           </div>
+          <form method="get" class="dashboard-cycle mt-3">
+            <div><label for="dashboard-cycle">Ciclo de vendas</label><select id="dashboard-cycle" name="ciclo" class="form-select">{% for cycle in cycle_choices %}<option value="{{ cycle.value }}" {% if cycle.value == cycle_value %}selected{% endif %}>{{ cycle.label }} · {{ cycle.start|date:"d/m" }}–{{ cycle.end|date:"d/m" }}</option>{% endfor %}</select></div>
+            <button type="submit" class="btn btn-dark">Aplicar</button>
+          </form>
         </div>
 
         <div class="row g-3 mb-4">
-          <div class="col-6 col-md-3"><div class="metric-card"><div class="label">Vendas no Mês</div><div class="value green">R$ {{ my_total_sold_month|floatformat:2 }}</div><small style="color:var(--muted)">Mês anterior: R$ {{ prev_total|floatformat:2 }}</small></div></div>
-          <div class="col-6 col-md-3"><div class="metric-card"><div class="label">Orçamentos no Mês</div><div class="value">{{ my_quotes_count_month }}</div><small style="color:var(--muted)">Convertidos: {{ my_converted_count_month }}</small></div></div>
-          <div class="col-6 col-md-3"><div class="metric-card"><div class="label">Taxa de Conversão</div><div class="value {% if my_conversion_rate >= 50 %}green{% elif my_conversion_rate < 20 %}red{% endif %}">{{ my_conversion_rate }}%</div><small style="color:var(--muted)">Desconto médio: {{ avg_discount }}%</small></div></div>
-          <div class="col-6 col-md-3"><div class="metric-card"><div class="label">Ticket Médio</div><div class="value">R$ {{ my_avg_ticket|floatformat:2 }}</div></div></div>
+          <div class="col-6 col-md-3"><div class="metric-card"><div class="label">Vendas no ciclo</div><div class="value">R$ {{ my_total_sold_month|floatformat:'2g' }}</div><small class="dashboard-period">{{ my_converted_count_month }} venda{{ my_converted_count_month|pluralize }} · anterior: R$ {{ prev_total|floatformat:'2g' }}</small></div></div>
+          <div class="col-6 col-md-3"><div class="metric-card"><div class="label">Orçamentos criados</div><div class="value">{{ my_quotes_count_month }}</div><small class="dashboard-period">{{ my_cohort_converted_month }} convertido{{ my_cohort_converted_month|pluralize }} deste ciclo</small></div></div>
+          <div class="col-6 col-md-3"><div class="metric-card"><div class="label">Taxa de conversão</div><div class="value">{% if my_quotes_count_month %}{{ my_conversion_rate }}%{% else %}—{% endif %}</div><small class="dashboard-period">{% if my_quotes_count_month %}Dos orçamentos criados no ciclo{% else %}Sem orçamentos no ciclo{% endif %}</small></div></div>
+          <div class="col-6 col-md-3"><div class="metric-card"><div class="label">Ticket médio</div><div class="value">{% if my_converted_count_month %}R$ {{ my_avg_ticket|floatformat:'2g' }}{% else %}—{% endif %}</div><small class="dashboard-period">{% if my_converted_count_month %}Por venda concluída{% else %}Sem vendas no ciclo{% endif %}</small></div></div>
         </div>
 
         <div class="section-header"><i class="fa-solid fa-bullseye me-2"></i>Minha Meta</div>
         <div class="section-body">
-          <div class="d-flex justify-content-between mb-1"><span class="fw-bold" style="color:var(--brand);">R$ {{ my_total_sold_month|floatformat:2 }} / R$ {{ goal_target|floatformat:2 }}</span><span style="color:var(--muted);font-size:.85rem;">{{ goal_pct_raw }}%</span></div>
-          <div class="goal-bar"><div class="fill" style="width: {{ goal_pct|unlocalize }}%;"></div></div>
+          {% if goal_target > 0 %}
+          <div class="d-flex justify-content-between mb-1 gap-2 flex-wrap"><span class="fw-bold" style="color:var(--brand);">R$ {{ my_total_sold_month|floatformat:'2g' }} de R$ {{ goal_target|floatformat:'2g' }}</span><span class="dashboard-period">{{ goal_pct_raw }}% atingido</span></div>
+          <div class="goal-bar" role="progressbar" aria-label="Progresso da minha meta" aria-valuenow="{{ goal_pct|unlocalize }}" aria-valuemin="0" aria-valuemax="100"><div class="fill" style="width: {{ goal_pct|unlocalize }}%;"></div></div>
+          <p class="dashboard-period mt-2 mb-0">{{ goal_source }}</p>
+          {% else %}<p class="dashboard-empty mb-0">Nenhuma meta pessoal cadastrada para este ciclo. <a href="{% url 'core:goals_list' %}">Ver metas</a></p>{% endif %}
         </div>
 
         <div class="row">
           <div class="col-lg-7">
-            <div class="section-header"><i class="fa-solid fa-chart-area me-2"></i>Evolução Mensal</div>
-            <div class="section-body" style="height: 300px;"><canvas id="salesChart"></canvas></div>
+            <div class="section-header"><i class="fa-solid fa-chart-area me-2" aria-hidden="true"></i>Evolução de vendas · últimos 6 ciclos</div>
+            <div class="section-body" style="height: {% if chart_has_sales %}300{% else %}120{% endif %}px;">{% if chart_has_sales %}<canvas id="salesChart" role="img" aria-label="Evolução das vendas pessoais nos últimos seis ciclos"></canvas>{% else %}<p class="dashboard-empty text-center mt-3">Sem vendas nos últimos seis ciclos.</p>{% endif %}</div>
           </div>
           <div class="col-lg-5">
             <div class="section-header"><i class="fa-solid fa-truck me-2"></i>Próximas Entregas (7 dias)</div>
             <div class="section-body" style="max-height: 140px; overflow-y: auto;">
               {% if upcoming_deliveries %}<table class="mini-table">{% for ev in upcoming_deliveries %}<tr><td>{{ ev.event_date|date:"d/m" }}</td><td>{{ ev.title|truncatechars:35 }}</td></tr>{% endfor %}</table>{% else %}<p class="text-muted mb-0 small">Nenhuma entrega nos próximos 7 dias</p>{% endif %}
             </div>
-            <div class="section-header" style="background:var(--red);"><i class="fa-solid fa-exclamation-triangle me-2"></i>Atrasados</div>
+            <div class="section-header"><i class="fa-solid fa-exclamation-triangle me-2 text-danger" aria-hidden="true"></i>Atrasados</div>
             <div class="section-body" style="max-height: 140px; overflow-y: auto;">
               {% if overdue_events %}<table class="mini-table">{% for ev in overdue_events %}<tr><td style="color:var(--red)">{{ ev.event_date|date:"d/m" }}</td><td>{{ ev.title|truncatechars:35 }}</td></tr>{% endfor %}</table>{% else %}<p class="text-muted mb-0 small">Nenhum evento atrasado</p>{% endif %}
             </div>
@@ -140,7 +160,10 @@
 
         <div class="section-header"><i class="fa-solid fa-file-invoice me-2"></i>Orçamentos Pendentes</div>
         <div class="section-body">
-          {% if pending_quotes %}<table class="mini-table"><thead><tr><th>Nº</th><th>Cliente</th><th>Vendedor</th><th>Data</th><th></th></tr></thead><tbody>{% for q in pending_quotes %}<tr><td>{{ q.number }}</td><td>{{ q.customer.name|truncatechars:30 }}</td><td>{{ q.seller.username }}</td><td>{{ q.quote_date|date:"d/m/Y" }}</td><td><a href="{% url 'sales:quote_detail' q.id %}" class="btn btn-sm btn-outline-dark">Ver</a></td></tr>{% endfor %}</tbody></table>{% else %}<p class="text-muted mb-0">Nenhum orçamento pendente</p>{% endif %}
+          {% if pending_quotes %}
+          <div class="pending-desktop table-responsive"><table class="mini-table"><thead><tr><th>Nº</th><th>Cliente</th><th>Vendedor</th><th>Data</th><th></th></tr></thead><tbody>{% for q in pending_quotes %}<tr><td>{{ q.number }}</td><td>{{ q.customer.name|truncatechars:30 }}</td><td>{{ q.seller.username }}</td><td>{{ q.quote_date|date:"d/m/Y" }}</td><td><a href="{% url 'sales:quote_detail' q.id %}" class="btn btn-sm btn-outline-dark">Ver orçamento</a></td></tr>{% endfor %}</tbody></table></div>
+          <div class="pending-mobile">{% for q in pending_quotes %}<a href="{% url 'sales:quote_detail' q.id %}"><span><strong>{{ q.number }} · {{ q.customer.name|truncatechars:24 }}</strong><small>{{ q.seller.username }} · {{ q.quote_date|date:"d/m/Y" }}</small></span><span aria-hidden="true">→</span></a>{% endfor %}</div>
+          {% else %}<p class="text-muted mb-0">Nenhum orçamento pendente</p>{% endif %}
         </div>
 
         {% if is_admin %}
@@ -149,17 +172,17 @@
             <div class="section-header"><i class="fa-solid fa-users me-2"></i>Performance da Equipe</div>
             <div class="section-body">
               <div class="row g-2 mb-3">
-                <div class="col-4"><div class="metric-card py-2 px-2 text-center"><div class="label">Total Vendas</div><div class="value green" style="font-size:1.1rem;">R$ {{ team_total_sold_month|floatformat:0 }}</div></div></div>
-                <div class="col-4"><div class="metric-card py-2 px-2 text-center"><div class="label">Orçamentos</div><div class="value" style="font-size:1.1rem;">{{ team_quotes_month }}</div></div></div>
-                <div class="col-4"><div class="metric-card py-2 px-2 text-center"><div class="label">Conversão</div><div class="value" style="font-size:1.1rem;">{{ team_conversion_rate }}%</div></div></div>
+                <div class="col-12 col-sm-4"><div class="metric-card py-2 px-2 text-center"><div class="label">Total vendas</div><div class="value" style="font-size:1.1rem;">R$ {{ team_total_sold_month|floatformat:'0g' }}</div></div></div>
+                <div class="col-12 col-sm-4"><div class="metric-card py-2 px-2 text-center"><div class="label">Orçamentos</div><div class="value" style="font-size:1.1rem;">{{ team_quotes_month }}</div></div></div>
+                <div class="col-12 col-sm-4"><div class="metric-card py-2 px-2 text-center"><div class="label">Conversão</div><div class="value" style="font-size:1.1rem;">{% if team_quotes_month %}{{ team_conversion_rate }}%{% else %}—{% endif %}</div></div></div>
               </div>
-              {% if collective_goal %}<div class="d-flex justify-content-between mb-1"><span class="fw-bold small" style="color:var(--brand);">Meta Coletiva: R$ {{ collective_goal|floatformat:0 }}</span><span style="color:var(--muted);font-size:.8rem;">{{ collective_goal_pct }}%</span></div><div class="goal-bar"><div class="fill" style="width:{{ collective_goal_pct|unlocalize }}%;"></div></div>{% endif %}
+              {% if collective_goal %}<div class="d-flex justify-content-between mb-1"><span class="fw-bold small" style="color:var(--brand);">Meta Coletiva: R$ {{ collective_goal|floatformat:'0g' }}</span><span style="color:var(--muted);font-size:.8rem;">{{ collective_goal_pct }}%</span></div><div class="goal-bar"><div class="fill" style="width:{{ collective_goal_pct|unlocalize }}%;"></div></div>{% endif %}
             </div>
           </div>
           <div class="col-lg-6">
-            <div class="section-header"><i class="fa-solid fa-trophy me-2"></i>Ranking do Mês</div>
+            <div class="section-header"><i class="fa-solid fa-trophy me-2"></i>Ranking do ciclo</div>
             <div class="section-body">
-              {% if seller_ranking %}<table class="mini-table"><thead><tr><th>#</th><th>Vendedor</th><th>Vendas</th><th>Total</th></tr></thead><tbody>{% for s in seller_ranking %}<tr><td>{{ forloop.counter }}</td><td>{{ s.seller__username }}</td><td>{{ s.count }}</td><td class="fw-bold">R$ {{ s.total|floatformat:0 }}</td></tr>{% endfor %}</tbody></table>{% else %}<p class="text-muted mb-0 small">Sem vendas neste mês</p>{% endif %}
+              {% if seller_ranking %}<table class="mini-table"><thead><tr><th>#</th><th>Vendedor</th><th>Vendas</th><th>Total</th></tr></thead><tbody>{% for s in seller_ranking %}<tr><td>{{ forloop.counter }}</td><td>{{ s.seller__username }}</td><td>{{ s.count }}</td><td class="fw-bold">R$ {{ s.total|floatformat:'0g' }}</td></tr>{% endfor %}</tbody></table>{% else %}<p class="text-muted mb-0 small">Sem vendas neste ciclo</p>{% endif %}
             </div>
           </div>
         </div>

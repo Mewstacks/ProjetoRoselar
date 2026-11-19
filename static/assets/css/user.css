@@ -1,5 +1,50 @@
 /* User-defined custom styles */
 
+:root {
+  --roselar-ink: #111418;
+  --roselar-surface: #fff;
+  --roselar-bg: #f4f6f9;
+  --roselar-border: #dee2e6;
+  --roselar-muted: #565c66;
+}
+
+html { scroll-padding-top: 5.5rem; }
+body { background-color: var(--roselar-bg); font-variant-numeric: tabular-nums; }
+.navbar.navbar-dark { background-color: var(--roselar-ink) !important; }
+.navbar-dark .nav-link { color: rgba(255,255,255,.82); }
+.navbar-dark .nav-link:hover,
+.navbar-dark .nav-link:focus-visible,
+.navbar-dark .nav-link.active { color: #fff; }
+.navbar-toggler { min-width: 44px; min-height: 44px; }
+.form-control, .form-select { border-color: var(--roselar-border); border-radius: 8px; }
+.form-control:focus, .form-select:focus {
+  border-color: var(--roselar-ink);
+  box-shadow: 0 0 0 3px rgba(17,20,24,.12);
+}
+:where(a, button, input, select, textarea, [role="button"]):focus-visible {
+  outline: 3px solid #111418;
+  outline-offset: 2px;
+}
+.navbar :where(a, button):focus-visible { outline-color: #fff; }
+.btn { border-radius: 8px; font-weight: 700; }
+.btn-success { background-color: #198754 !important; border-color: #198754 !important; color: #fff !important; }
+.btn-success:hover { background-color: #146c43 !important; border-color: #146c43 !important; }
+.btn-dark { background-color: #111418 !important; border-color: #111418 !important; color: #fff !important; }
+.btn-dark:hover { background-color: #23272e !important; border-color: #23272e !important; }
+.btn-secondary { background-color: #fff !important; border-color: #c5ccd3 !important; color: #111418 !important; }
+.btn-secondary:hover { background-color: #f4f6f9 !important; border-color: #aeb7c0 !important; color: #111418 !important; }
+.btn-outline-dark { border-color: #111418 !important; color: #111418 !important; }
+.btn-outline-dark:hover { background-color: #111418 !important; color: #fff !important; }
+.table { --bs-table-color: var(--roselar-ink); }
+.table thead th { color: var(--roselar-muted); font-size: .72rem; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; }
+.text-muted { color: var(--roselar-muted) !important; }
+@media (pointer: coarse) {
+  .btn, .btn-sm, .navbar-dark .nav-link { min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+
 /*
  * Navbar mobile: quando o menu (collapse) está aberto num ecrã pequeno,
  * garante que o fundo seja sempre navy sólido — evita ícones brancos

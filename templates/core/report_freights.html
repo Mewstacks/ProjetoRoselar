@@ -37,19 +37,19 @@
       <form method="get" class="card card-body shadow-sm mb-3">
         <div class="d-flex align-items-end gap-2 flex-wrap">
           {% include "core/_period_filter.html" %}
-          <button class="btn btn-primary" type="submit"><i class="fa-solid fa-filter me-1" aria-hidden="true"></i>Filtrar</button>
+          <button class="btn btn-dark" type="submit"><i class="fa-solid fa-filter me-1" aria-hidden="true"></i>Filtrar</button>
         </div>
       </form>
       <div class="row g-3 mb-3">
         <div class="col-md-6"><div class="card card-body text-center"><div class="small text-uppercase text-muted fw-bold">Vendas com frete descontado</div><strong class="fs-4">{{ count }}</strong></div></div>
-        <div class="col-md-6"><div class="card card-body text-center"><div class="small text-uppercase text-muted fw-bold">Total abatido das comissões</div><strong class="fs-4 text-danger">R$ {{ total_freight_deduction|floatformat:2 }}</strong></div></div>
+        <div class="col-md-6"><div class="card card-body text-center"><div class="small text-uppercase text-muted fw-bold">Total abatido das comissões</div><strong class="fs-4 text-danger">R$ {{ total_freight_deduction|floatformat:'2g' }}</strong></div></div>
       </div>
       <div class="card shadow-sm overflow-hidden">
         <div class="table-responsive">
           <table class="table table-hover align-middle mb-0">
             <caption class="visually-hidden">Fretes descontados da comissão por venda no período selecionado.</caption>
             <thead class="table-dark"><tr><th scope="col">Data</th><th scope="col">Venda</th><th scope="col">Cliente</th><th scope="col">Vendedor</th><th scope="col" class="text-end">Frete abatido</th></tr></thead>
-            <tbody>{% for quote in quotes %}<tr><td>{{ quote.sold_on|date:"d/m/Y" }}</td><td><a href="{% url 'sales:quote_detail' quote.id %}">{{ quote.number }}</a></td><td>{{ quote.customer.name }}</td><td>{{ quote.seller.get_full_name|default:quote.seller.username }}</td><td class="text-end fw-bold text-danger">− R$ {{ quote.freight_commission_deduction|floatformat:2 }}</td></tr>{% empty %}<tr><td colspan="5" class="text-center text-muted py-5">Nenhum frete descontado neste período.</td></tr>{% endfor %}</tbody>
+            <tbody>{% for quote in quotes %}<tr><td>{{ quote.sold_on|date:"d/m/Y" }}</td><td><a href="{% url 'sales:quote_detail' quote.id %}">{{ quote.number }}</a></td><td>{{ quote.customer.name }}</td><td>{{ quote.seller.get_full_name|default:quote.seller.username }}</td><td class="text-end fw-bold text-danger">− R$ {{ quote.freight_commission_deduction|floatformat:'2g' }}</td></tr>{% empty %}<tr><td colspan="5" class="text-center text-muted py-5">Nenhum frete descontado neste período.</td></tr>{% endfor %}</tbody>
           </table>
         </div>
       </div>

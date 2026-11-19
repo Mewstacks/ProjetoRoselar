@@ -96,7 +96,7 @@ def _build_value_breakdown(quote):
     )
     has_override = (
         selected_tier == PriceTier.RETAIL
-        and quote.effective_total_override is not None
+        and quote.retail_override_for_terms() is not None
     )
     subtotal = quote.calculate_subtotal_for_tier(selected_tier)
     # Com preço final digitado a barrinha e o Ajuste de Preço não formam o
@@ -114,7 +114,7 @@ def _build_value_breakdown(quote):
     )
     markup_amount = subtotal * markup_pct / Decimal("100")
     discount_amount = subtotal * discount_pct / Decimal("100")
-    freight = quote.freight_value or Decimal("0.00")
+    freight = quote.freight_amount(selected_tier)
     from .models import FreightResponsible
     freight_to_store = quote.freight_responsible == FreightResponsible.STORE
     if selected_tier == PriceTier.WHOLESALE:
@@ -172,11 +172,13 @@ def _build_value_breakdown(quote):
         # à vista — as duas linhas precisam continuar visíveis lado a lado.
         "cash_total": (
             quote.calculate_rounded_total_cash()
-            if selected_tier == PriceTier.RETAIL
+            if selected_tier == PriceTier.RETAIL and not quote.cash_only
             else None
         ),
         "installment_total": quote.calculate_rounded_total(),
         "selected_payment_terms": quote.selected_payment_terms,
+        "full_pix": quote.is_full_pix,
+        "cash_only": selected_tier == PriceTier.RETAIL and quote.cash_only,
         "sold_cash": (
             selected_tier == PriceTier.RETAIL
             and quote.selected_payment_terms == PaymentTerms.CASH
@@ -628,7 +630,7 @@ def quote_create(request: HttpRequest) -> HttpResponse:
         form = QuoteForm(request.POST)
         formset = QuoteItemFormSet(request.POST, request.FILES)
 
-        if form.is_valid() and formset.is_valid():
+        if form.is_valid() and formset.is_valid() and form.validate_freight_items(formset):
             try:
                 with transaction.atomic():
                     quote: Quote = form.save(commit=False)
@@ -749,7 +751,7 @@ def quote_edit(request: HttpRequest, quote_id: int) -> HttpResponse:
         form = QuoteForm(request.POST, instance=quote)
         formset = QuoteItemFormSet(request.POST, request.FILES, instance=quote)
 
-        if form.is_valid() and formset.is_valid():
+        if form.is_valid() and formset.is_valid() and form.validate_freight_items(formset):
             with transaction.atomic():
                 quote_obj = form.save(commit=False)
                 
@@ -762,6 +764,14 @@ def quote_edit(request: HttpRequest, quote_id: int) -> HttpResponse:
 
                 if not quote_obj.dual_pricing:
                     quote_obj.selected_price_tier = PriceTier.RETAIL
+                if (
+                    quote_obj.status in SOLD_STATUSES
+                    and quote_obj.selected_price_tier == PriceTier.RETAIL
+                    and quote_obj.effective_cash_override is not None
+                    and quote_obj.effective_total_override is None
+                    and {"total_override", "total_cash_override"}.intersection(form.changed_data)
+                ):
+                    quote_obj.selected_payment_terms = PaymentTerms.CASH
                 quote_obj.save()
                 formset.save()
                 _persist_item_order_from_formset(formset)
@@ -774,18 +784,18 @@ def quote_edit(request: HttpRequest, quote_id: int) -> HttpResponse:
                 if quote.status in SOLD_STATUSES:
                     persist_quote_commission(quote)
 
-            from core.audit import log_quote_diff
-            from core.models import AuditAction
-            # Instância nova: o signal post_save reescreve total_value_snapshot
-            # via .update(), então o objeto em memória ainda traz o total velho.
-            log_quote_diff(
-                request.user,
-                AuditAction.EDIT_QUOTE,
-                Quote.objects.select_related("seller", "architect").get(pk=quote.pk),
-                before,
-                description=f"Orçamento {quote.number} editado.",
-                ip_address=request.META.get('REMOTE_ADDR'),
-            )
+                from core.audit import log_quote_diff
+                from core.models import AuditAction
+                # Instância nova: o signal post_save reescreve total_value_snapshot
+                # via .update(), então o objeto em memória ainda traz o total velho.
+                log_quote_diff(
+                    request.user,
+                    AuditAction.EDIT_QUOTE,
+                    Quote.objects.select_related("seller", "architect").get(pk=quote.pk),
+                    before,
+                    description=f"Orçamento {quote.number} editado.",
+                    ip_address=request.META.get('REMOTE_ADDR'),
+                )
 
             if edit_token:
                 _mark_edit_token_used(request, quote.id, edit_token)
@@ -862,6 +872,15 @@ def quote_detail(request: HttpRequest, quote_id: int) -> HttpResponse:
         if _is_admin(request.user) else []
     )
 
+    item_freight_rows = []
+    if quote.embeds_freight:
+        wholesale = quote.dual_pricing and quote.selected_price_tier == PriceTier.WHOLESALE
+        markup = (quote.price_increase_percent or Decimal("0")) / 100
+        items = list(quote.items.all())
+        for item, freight in zip(items, quote.freight_allocations(items=items)):
+            original = item.line_total_wholesale if wholesale else item.line_total
+            item_freight_rows.append((item, original, freight, original * (1 + markup) + freight))
+
     return render(request, "sales/quote_detail.html", {
         "quote": quote,
         "sellers_for_split": sellers_for_split,
@@ -877,6 +896,7 @@ def quote_detail(request: HttpRequest, quote_id: int) -> HttpResponse:
         "can_generate_order_pdf": _can_generate_order_pdf(request.user),
         "can_view_supplier_pdf": _is_admin(request.user),
         "can_view_commission": _can_view_commission(request.user) or (quote.seller_id == request.user.id),
+        "item_freight_rows": item_freight_rows,
         "total_order": total_order,
         "can_approve_order": (
             _fin_or_admin
@@ -1129,8 +1149,7 @@ def quote_convert_to_orders(request: HttpRequest, quote_id: int) -> HttpResponse
                 selected_price_tier = PriceTier.RETAIL
 
             # Condição fechada (à vista / a prazo). Só é uma escolha real quando
-            # existe preço à vista digitado e a venda fechou no varejo; fora
-            # disso o orçamento tem um preço só e a condição é a prazo.
+            # existe preço à vista digitado e a venda fechou no varejo.
             selected_payment_terms = request.POST.get(
                 "selected_payment_terms",
                 PaymentTerms.INSTALLMENT,
@@ -1139,8 +1158,12 @@ def quote_convert_to_orders(request: HttpRequest, quote_id: int) -> HttpResponse
                 selected_price_tier == PriceTier.RETAIL
                 and quote.calculate_rounded_total_cash() is not None
             )
-            if not cash_available:
-                selected_payment_terms = PaymentTerms.INSTALLMENT
+            if cash_available and quote.cash_only:
+                selected_payment_terms = PaymentTerms.CASH
+            elif not cash_available:
+                selected_payment_terms = (
+                    PaymentTerms.CASH if quote.is_full_pix else PaymentTerms.INSTALLMENT
+                )
             elif selected_payment_terms not in PaymentTerms.values:
                 raise ValidationError(
                     "Escolha se a venda foi fechada à vista ou a prazo."
@@ -1519,7 +1542,7 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
     ENV_H    = 32
     IMG_SZ   = 128
     PAYMENT_PLANS = quote.get_payment_plans()
-    CASH_TOTAL = None if options_mode else quote.calculate_rounded_total_cash()
+    CASH_TOTAL = None if options_mode or quote.cash_only else quote.calculate_rounded_total_cash()
     # Observações do orçamento impressas ao cliente. As linhas são quebradas
     # UMA vez: a mesma lista dimensiona o FOOTER_H e é redesenhada no rodapé —
     # se os dois cálculos divergirem, o rodapé cobre o último item.
@@ -1548,6 +1571,17 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
     items = list(
         quote.items.prefetch_related('images').order_by('position', 'id')
     )
+    retail_freight = {}
+    wholesale_freight = {}
+    if quote.embeds_freight:
+        retail_freight = dict(zip(
+            (item.pk for item in items), quote.freight_allocations(PriceTier.RETAIL, items)
+        ))
+        if quote.dual_pricing:
+            wholesale_freight = dict(zip(
+                (item.pk for item in items), quote.freight_allocations(PriceTier.WHOLESALE, items)
+            ))
+
 
     def _items_page_bg():
         # Fundo branco em toda a página de itens (header + lista de produtos),
@@ -1668,10 +1702,11 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
         markup_pct = quote.price_increase_percent or Decimal('0')
         markup_mult = Decimal('1') + markup_pct / Decimal('100')
         unit_price = item.unit_value * markup_mult
-        qty_label = "valor total" if item.quantity == 1 else "valor unitário"
+        show_line_total = quote.embeds_freight or item.quantity == 1
+        qty_label = "valor total" if show_line_total else "valor unitário"
 
-        def _price_block(x, label, base_unit):
-            amt = base_unit * item.quantity if item.quantity == 1 else base_unit
+        def _price_block(x, label, base_unit, freight):
+            amt = base_unit * item.quantity + freight if show_line_total else base_unit
             c.setFillColor(GRAY)
             _draw_spaced(label, x, price_y + 13, FONT_REG, 7.5, cs=1.5)
             c.setFillColor(NAVY)
@@ -1681,11 +1716,11 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
         if quote.dual_pricing:
             # Dois preços por item: varejo (unit_value) e atacado
             # (unit_value_wholesale, caindo no varejo se em branco).
-            _price_block(txt_x, f"varejo · {qty_label}", unit_price)
+            _price_block(txt_x, f"varejo · {qty_label}", unit_price, retail_freight.get(item.pk, 0))
             _price_block(txt_x + txt_w / 2, f"atacado · {qty_label}",
-                         item.wholesale_unit_value * markup_mult)
+                         item.wholesale_unit_value * markup_mult, wholesale_freight.get(item.pk, 0))
         else:
-            _price_block(txt_x, qty_label, unit_price)
+            _price_block(txt_x, qty_label, unit_price, retail_freight.get(item.pk, 0))
 
         bot_y = y_top - ITEM_H
         c.setStrokeColor(RULE)
@@ -1729,7 +1764,7 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
             # ── Orçamento de opções: cliente escolhe, nada é somado ──────
             # Frete repassado ficaria invisível sem a barra de total, então
             # vira linha informativa própria.
-            if quote.billable_freight > 0:
+            if not quote.embeds_freight and quote.billable_freight > 0:
                 c.setFillColor(GRAY)
                 c.setFont(FONT_REG, 8.5)
                 c.drawString(
@@ -1771,7 +1806,7 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
         # a barrinha tenha gravado é entrada esquecida, não desconto dado.
         disc_pct   = (
             Decimal('0')
-            if quote.effective_total_override is not None
+            if quote.cash_only or quote.effective_total_override is not None
             else (quote.discount_percent or Decimal('0'))
         )
         disc_val   = subtotal * disc_pct / Decimal('100')
@@ -1817,6 +1852,8 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
                 )
 
         for plan in PAYMENT_PLANS:
+            if quote.cash_only and plan["tier"] == PriceTier.RETAIL:
+                continue
             prefix = f"{plan['tier_label']} — " if quote.dual_pricing else ""
 
             if plan["down_payment"] > 0:
@@ -1851,7 +1888,10 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
                     and action != leg["method_label"]
                     else ""
                 )
-                label = f"{prefix}{action}{method_suffix}"
+                if quote.is_full_pix and CASH_TOTAL is None and not quote.dual_pricing:
+                    label = f"{prefix}À vista no Pix"
+                else:
+                    label = f"{prefix}{action}{method_suffix}"
                 if leg["installments"] > 1:
                     value = (
                         f"{leg['installments']}x de "
@@ -1871,6 +1911,8 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
         total_lbl = "Valor do investimento com desconto" if disc_pct > 0 else "Valor do investimento"
         if quote.dual_pricing:
             total_lbl = "Valor do investimento — Varejo"
+        if quote.cash_only:
+            total_lbl = f"{total_lbl} — À vista"
         if CASH_TOTAL is not None:
             # Com as duas condições na proposta, a barra cheia é a prazo — só
             # o par "a prazo / à vista" faz o cliente ler a diferença.
@@ -3103,7 +3145,7 @@ def _attach_dual_payment_simulation(ctx: dict, quote: Quote) -> None:
                 + markup_pct / Decimal("100")
                 - retail_discount / Decimal("100")
             )
-            + quote.billable_freight
+            + quote.billable_freight_for_tier(PriceTier.RETAIL)
         )
     )
     wholesale_total = (
@@ -3152,14 +3194,7 @@ def quote_simulate_commission(request: HttpRequest, quote_id: int) -> HttpRespon
     # barrinha e o Ajuste de Preço não formam o total: ficam travados na tela e o
     # servidor não aceita que mudem, nem por um POST antigo ou forjado.
     sim_total_override = (
-        (
-            quote.effective_cash_override
-            if quote.selected_payment_terms == PaymentTerms.CASH
-            and quote.effective_cash_override is not None
-            else quote.effective_total_override
-        )
-        if pricing_tier == PriceTier.RETAIL
-        else None
+        quote.retail_override_for_terms() if pricing_tier == PriceTier.RETAIL else None
     )
 
     if request.method == "POST":
@@ -3247,6 +3282,8 @@ def quote_simulate_commission(request: HttpRequest, quote_id: int) -> HttpRespon
     ctx = _build_simulation_context(
         subtotal=subtotal,
         freight_value=freight_value,
+        freight_embedded=quote.embeds_freight,
+        cash_only=pricing_tier == PriceTier.RETAIL and quote.cash_only,
         sim_payment_type=sim_payment_type,
         sim_has_architect=sim_has_architect,
         sim_discount=sim_discount,
@@ -3273,6 +3310,21 @@ def quote_simulate_commission(request: HttpRequest, quote_id: int) -> HttpRespon
     quote_actions_unlocked = bool(request.session.get(save_session_key, False))
 
     if request.method == "POST" and request.POST.get('action') == 'save_conditions':
+        if ctx['freight_commission_deduction'] > ctx['final_total']:
+            ctx['freight_deduction_error'] = (
+                "Informe um frete menor ou igual ao total cobrado do cliente."
+            )
+            messages.error(
+                request,
+                "O frete a abater não pode ser maior que o total cobrado do cliente.",
+            )
+            ctx['quote'] = quote
+            ctx['quote_actions_unlocked'] = quote_actions_unlocked
+            ctx['selected_architect'] = selected_architect
+            ctx['sim_architect_id'] = sim_architect_id
+            ctx['can_view_commission'] = _can_view_commission(request.user)
+            ctx['is_admin'] = _is_admin(request.user)
+            return render(request, 'sales/quote_simulation.html', ctx)
         if ctx['manual_fee_required_1'] or ctx['manual_fee_required_2']:
             messages.error(request, "Informe a taxa do cartão para a parcela escolhida antes de salvar.")
             ctx['quote'] = quote
@@ -3481,6 +3533,8 @@ def quote_duplicate(request, quote_id):
             status=QuoteStatus.DRAFT,
             quote_date=timezone.localdate(),
             freight_value=original.freight_value,
+            freight_percent=original.freight_percent,
+            freight_embedded=original.freight_embedded,
             freight_commission_deduction=original.freight_commission_deduction,
             freight_responsible=original.freight_responsible,
             shipping_company=original.shipping_company,

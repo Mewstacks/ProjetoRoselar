@@ -88,6 +88,18 @@
         border-color: var(--brand) !important;
         box-shadow: 0 0 0 3px rgba(17,20,24,.1) !important;
       }
+      #freight-value-container :is(input, select):focus-visible {
+        outline: 2px solid var(--brand);
+        outline-offset: 2px;
+      }
+      #freight-value-container .form-check-label {
+        display: inline-flex;
+        align-items: center;
+        min-height: 24px;
+        cursor: pointer;
+      }
+      #freight-embedded-help { color: var(--muted) !important; }
+      #freight-preview { color: var(--brand); font-variant-numeric: tabular-nums; }
       .f-label, .form-label {
         font-size: .72rem !important; font-weight: 700 !important;
         text-transform: uppercase; letter-spacing: .04em;
@@ -370,23 +382,53 @@
                           {% endif %}
                         </div>
                       </div>
+
+                      <div class="p-3 mb-3 border rounded-3 bg-light-subtle">
+                        <label for="{{ form.freight_commission_deduction.id_for_label }}" class="form-label fw-bold mb-1">
+                          Frete a abater da venda e comissão (R$)
+                        </label>
+                        {{ form.freight_commission_deduction }}
+                        <small id="freight-deduction-help" class="d-block text-muted mt-2">
+                          Controle interno: reduz a venda nos relatórios, metas e comissão. Não altera o total cobrado do cliente.
+                        </small>
+                        {% if form.freight_commission_deduction.errors %}
+                          <div class="text-danger small mt-1">{{ form.freight_commission_deduction.errors }}</div>
+                        {% endif %}
+                      </div>
                       
                       <!-- Empresa paga: mostrar valor e prazo | Cliente paga: ocultar -->
                       <div id="freight-content">
                         <div class="row" id="freight-value-container">
-                          <div class="col-md-6 mb-3">
-                            <label for="{{ form.freight_value.id_for_label }}" class="form-label fw-bold">Valor do Frete (R$)</label>
-                            {{ form.freight_value }}
-                            {% if form.freight_value.errors %}
-                              <div class="text-danger small">{{ form.freight_value.errors }}</div>
-                            {% endif %}
+                          <div class="col-sm-4 mb-3">
+                            <label for="{{ form.freight_unit.id_for_label }}" class="form-label fw-bold">Unidade do frete</label>
+                            {{ form.freight_unit }}
+                            {{ form.freight_unit.errors }}
                           </div>
+                          <div class="col-sm-8 mb-3" id="freight-brl-field">
+                            <label for="{{ form.freight_value.id_for_label }}" class="form-label fw-bold">Valor do frete (R$)</label>
+                            {{ form.freight_value }}
+                            {{ form.freight_value.errors }}
+                          </div>
+                          <div class="col-sm-8 mb-3" id="freight-percent-field">
+                            <label for="{{ form.freight_percent.id_for_label }}" class="form-label fw-bold">Percentual de frete (%)</label>
+                            {{ form.freight_percent }}
+                            {{ form.freight_percent.errors }}
+                          </div>
+                          <div class="col-12 mb-2" id="freight-embedded-field">
+                            <div class="form-check">
+                              {{ form.freight_embedded }}
+                              <label for="{{ form.freight_embedded.id_for_label }}" class="form-check-label">Embutir nos produtos</label>
+                            </div>
+                            <small id="freight-embedded-help" class="text-muted">O cliente vê o preço com frete. A equipe confere o acréscimo por item.</small>
+                            {{ form.freight_embedded.errors }}
+                          </div>
+                          <p id="freight-preview" class="col-12 mb-3 fw-semibold" aria-live="polite"></p>
                         </div>
-                        
+
                         <div id="shipping-company-container">
                           <div class="row">
                             <div class="col-md-12 mb-3">
-                              <label class="form-label fw-bold">Transportadora</label>
+                              <label for="shipping-company-search" class="form-label fw-bold">Transportadora</label>
                               <input type="text" id="shipping-company-search" class="form-control"
                                      placeholder="Digite o nome da transportadora" autocomplete="off">
                               <small id="shipping-search-hint" class="text-muted">
@@ -694,17 +736,17 @@
                 </div>
                 <div class="row">
                   <div class="col-md-6 mb-3">
-                    <label for="{{ form.total_override.id_for_label }}" class="form-label fw-bold">Preço final &mdash; a prazo (R$)</label>
+                    <label for="{{ form.total_override.id_for_label }}" class="form-label fw-bold">Preço final (R$)</label>
                     {{ form.total_override }}
-                    <small class="text-muted">Em branco usa o total calculado.</small>
+                    <small class="text-muted" id="{{ form.total_override.auto_id }}_helptext">{{ form.total_override.help_text }}</small>
                     {% if form.total_override.errors %}
                       <div class="text-danger small">{{ form.total_override.errors }}</div>
                     {% endif %}
                   </div>
                   <div class="col-md-6 mb-3">
-                    <label for="{{ form.total_cash_override.id_for_label }}" class="form-label fw-bold">Preço final &mdash; à vista (R$)</label>
+                    <label for="{{ form.total_cash_override.id_for_label }}" class="form-label fw-bold">Preço à vista (R$)</label>
                     {{ form.total_cash_override }}
-                    <small class="text-muted">Em branco não mostra à vista.</small>
+                    <small class="text-muted" id="{{ form.total_cash_override.auto_id }}_helptext">{{ form.total_cash_override.help_text }}</small>
                     {% if form.total_cash_override.errors %}
                       <div class="text-danger small">{{ form.total_cash_override.errors }}</div>
                     {% endif %}
@@ -736,10 +778,10 @@
               <div style="padding:1rem 1.3rem;">
                 <div class="d-flex justify-content-end gap-3 flex-wrap">
                   <button type="submit" class="btn-a dark" name="action" value="save">
-                    <i class="fa-solid fa-save"></i>Salvar Orçamento
+                    <i class="fa-solid fa-save" aria-hidden="true"></i>Salvar Orçamento
                   </button>
                   <button type="submit" class="btn-a primary" name="action" value="next_step">
-                    <i class="fa-solid fa-arrow-right"></i>Salvar e Avançar
+                    <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>Salvar e Avançar
                   </button>
                 </div>
               </div>
@@ -773,6 +815,10 @@
 
     <script>
       // Add form-control class to all form inputs
+      function parseFreightDecimal(value) {
+        return Number(value.includes(',') ? value.replace(/\./g, '').replace(',', '.') : value);
+      }
+
       document.addEventListener('DOMContentLoaded', function() {
         const inputs = document.querySelectorAll('input:not([type="checkbox"]):not([type="hidden"]), select, textarea');
         inputs.forEach(input => {
@@ -784,6 +830,62 @@
         const freightContent = document.getElementById('freight-content');
         const freightValueContainer = document.getElementById('freight-value-container');
         const freightValueInput = document.querySelector('input[name="freight_value"]');
+        const freightUnit = document.getElementById('id_freight_unit');
+        const freightPercent = document.getElementById('id_freight_percent');
+        const freightEmbedded = document.getElementById('id_freight_embedded');
+        const freightPreview = document.getElementById('freight-preview');
+        const freightCurrency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+
+
+        function updateFreightPreview() {
+          const percentMode = freightUnit.value === 'PERCENT';
+          const canEmbed = freightResponsibleSelect.value === 'CARRIER';
+          document.getElementById('freight-brl-field').hidden = percentMode;
+          document.getElementById('freight-percent-field').hidden = !percentMode;
+          document.getElementById('freight-embedded-field').hidden = !canEmbed;
+          freightValueInput.disabled = percentMode;
+          freightPercent.disabled = !percentMode;
+          freightEmbedded.disabled = !canEmbed;
+          const amount = parseFreightDecimal((percentMode ? freightPercent : freightValueInput).value);
+          if (!Number.isFinite(amount) || amount <= 0) {
+            freightPreview.textContent = '';
+            return;
+          }
+
+          if (!percentMode) {
+            freightPreview.textContent = 'Frete calculado · ' + freightCurrency.format(amount);
+            return;
+          }
+          let retail = 0;
+          let wholesale = 0;
+          let hasPricedItem = false;
+          for (const row of document.querySelectorAll('[data-formset-row]')) {
+            if (row.querySelector('[name$="-DELETE"]')?.checked) continue;
+            const qty = Number(row.querySelector('[name$="-quantity"]')?.value || 0);
+            const price = parseFreightDecimal(row.querySelector('[name$="-unit_value"]')?.value || '');
+            const wholesalePrice = parseFreightDecimal(row.querySelector('[name$="-unit_value_wholesale"]')?.value || '');
+            if (!(qty > 0 && price > 0)) continue;
+            hasPricedItem = true;
+            const basisPoints = Math.round(amount * 100);
+            retail += Math.round(Math.round(price * 100) * qty * basisPoints / 10000);
+            wholesale += Math.round(Math.round((wholesalePrice || price) * 100) * qty * basisPoints / 10000);
+          }
+          const dualPricing = document.getElementById('id_dual_pricing')?.checked;
+          const label = 'Frete calculado · ' + freightCurrency.format(retail / 100)
+            + (dualPricing ? ' no varejo · ' + freightCurrency.format(wholesale / 100) + ' no atacado' : '');
+          freightPreview.textContent = hasPricedItem ? label : 'Informe o valor dos produtos para calcular o frete.';
+        }
+        const freightForm = freightUnit.form;
+        for (const event of ['input', 'change']) {
+          freightForm.addEventListener(event, (e) => {
+            if (e.target.matches('[name^="freight_"], [name="dual_pricing"], [name$="-quantity"], [name$="-unit_value"], [name$="-unit_value_wholesale"], [name$="-DELETE"]')) {
+              updateFreightPreview();
+            }
+          });
+        }
+        freightForm.addEventListener('click', (e) => {
+          if (e.target.closest('[data-formset-row] button')) queueMicrotask(updateFreightPreview);
+        });
         const shippingCompanyContainer = document.getElementById('shipping-company-container');
         const deliveryFieldsContainer = document.getElementById('delivery-fields-container');
         const deliveryDeadlineInput = document.querySelector('input[name="delivery_days_min"]');
@@ -814,7 +916,10 @@
         if (freightResponsibleSelect) {
           // Apply initial state
           updateFreightAndDeliveryFields();
-          
+          updateFreightPreview();
+          const invalidField = document.querySelector('[aria-invalid="true"]:not(:disabled)');
+          if (invalidField) invalidField.focus();
+
           // Listen for changes
           freightResponsibleSelect.addEventListener('change', updateFreightAndDeliveryFields);
         }
@@ -1551,9 +1656,10 @@
         const missingFreight = [];
 
         if (frVal === 'STORE' || frVal === 'CARRIER') {
-          const fv = document.querySelector('input[name="freight_value"]');
+          const percentMode = document.getElementById('id_freight_unit').value === 'PERCENT';
+          const fv = document.getElementById(percentMode ? 'id_freight_percent' : 'id_freight_value');
           const dw = document.querySelector('input[name="delivery_days_min"]');
-          if (!fv || !fv.value.trim() || parseFloat(fv.value.replace(/\./g, '').replace(',','.')) <= 0) missingFreight.push('Valor do Frete');
+          if (!fv || !fv.value.trim() || !(parseFreightDecimal(fv.value) > 0)) missingFreight.push('Valor do Frete');
           if (!dw || !dw.value) missingFreight.push('Prazo de Entrega');
           if (frVal === 'CARRIER') {
             const sc = document.querySelector('select[name="shipping_company"]');
@@ -1589,11 +1695,13 @@
           const qVal = quantity ? quantity.value.trim() : '';
           const uVal = unitValue ? unitValue.value.trim() : '';
 
-          const allEmpty = !sVal && !pVal && !qVal && !uVal;
-          const onlySupplier = sVal && !pVal && !qVal && !uVal;
+          const wholesaleValue = row.querySelector('input[name$="-unit_value_wholesale"]');
+          // A quantidade padrão de uma linha nova não indica que há um produto.
+          const itemId = row.querySelector('input[name$="-id"]')?.value;
+          const blankItem = !itemId && !pVal && !uVal && !wholesaleValue?.value.trim();
           const allFilled = sVal && pVal && qVal && uVal;
 
-          if (allEmpty || onlySupplier) {
+          if (blankItem) {
             if (delCb) {
               delCb.checked = true;
               row.style.display = 'none';

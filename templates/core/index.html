@@ -30,15 +30,14 @@
     input::placeholder, textarea::placeholder { color: #565C66; opacity: 1; }
 
       /* s-card design system */
-      .s-card{background:var(--surface);border-radius:var(--radius);box-shadow:var(--shadow);margin-bottom:1rem;overflow:hidden;border:1px solid rgba(0,0,0,.04);transition:box-shadow .2s;}
-      .s-card:hover{box-shadow:var(--shadow-h);}
+      .s-card{background:var(--surface);border-radius:var(--radius);box-shadow:var(--shadow);margin-bottom:1rem;overflow:hidden;border:1px solid rgba(0,0,0,.04);}
       .s-hdr{padding:.7rem 1.1rem;display:flex;align-items:center;gap:.55rem;font-weight:700;font-size:.88rem;color:var(--brand);background:#fafbfc;border-bottom:1px solid var(--border);}
       .s-icon{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:.78rem;color:#fff;flex-shrink:0;}
       .s-icon.brand{background:var(--brand);}.s-icon.green{background:var(--green);}.s-icon.blue{background:var(--blue);}.s-icon.red{background:var(--red);}.s-icon.muted{background:var(--muted);}.s-icon.orange{background:var(--orange);}
       .s-body{padding:1.1rem;}
 
       /* buttons */
-      .btn-a{display:inline-flex;align-items:center;gap:.35rem;padding:.55rem 1.2rem;font-weight:700;font-size:.85rem;border:none;border-radius:8px;cursor:pointer;text-decoration:none;transition:all .2s;}
+      .btn-a{display:inline-flex;align-items:center;gap:.35rem;padding:.55rem 1.2rem;font-weight:700;font-size:.85rem;border:none;border-radius:8px;cursor:pointer;text-decoration:none;transition:transform .2s ease-out,box-shadow .2s ease-out,background-color .2s ease-out,color .2s ease-out,border-color .2s ease-out;}
       .btn-a:hover{transform:translateY(-1px);box-shadow:var(--shadow-h);}
       .btn-a:focus-visible{outline:3px solid rgba(17,20,24,.35);outline-offset:2px;}
       .btn-a.primary{background:var(--green);color:#fff;}.btn-a.primary:hover{background:#146c43;color:#fff;}
@@ -46,25 +45,6 @@
       .btn-a.dark{background:var(--brand);color:#fff;}.btn-a.dark:hover{background:var(--brand-l);color:#fff;}
       .btn-a.outline{background:transparent;color:var(--brand);border:1.5px solid var(--border);}.btn-a.outline:hover{background:var(--bg);}
 
-      /* hero gradient */
-      .idx-hero{background:var(--brand);padding-top:130px;padding-bottom:3rem;position:relative;overflow:hidden;}
-      .idx-hero::after{content:'';position:absolute;top:-30%;right:-10%;width:50%;height:160%;background:radial-gradient(circle,rgba(255,255,255,.04) 0%,transparent 70%);pointer-events:none;}
-      .idx-greeting h1{font-size:1.6rem;font-weight:800;color:#fff;margin:0 0 .3rem;}
-      .idx-greeting p{color:rgba(255,255,255,.7);font-size:.92rem;margin:0 0 1rem;}
-      .idx-greeting .btn-a.primary{background:var(--green);color:#fff;}.idx-greeting .btn-a.primary:hover{background:#146c43;color:#fff;}
-      .idx-greeting .btn-a.g-outline{color:#fff;border-color:rgba(255,255,255,.3);background:transparent;}.idx-greeting .btn-a.g-outline:hover{background:rgba(255,255,255,.1);color:#fff;}
-
-      /* hero glass cards */
-      .h-metric{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:var(--radius);padding:.8rem 1rem;text-align:center;}
-      .h-metric .hm-label{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:rgba(255,255,255,.7);font-weight:600;margin-bottom:2px;}
-      .h-metric .hm-value{font-size:1.3rem;font-weight:700;color:#fff;}
-      .h-metric .hm-value.green{color:#5CBE8F;}
-      .h-metric .hm-sub{font-size:.72rem;color:rgba(255,255,255,.65);}
-      .h-chart-label{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:rgba(255,255,255,.7);font-weight:600;margin-bottom:.3rem;text-align:center;}
-      .h-mini-table{width:100%;font-size:.78rem;border-collapse:collapse;}
-      .h-mini-table th{color:rgba(255,255,255,.7);font-size:.72rem;text-transform:uppercase;font-weight:600;padding:.25rem .4rem;border-bottom:1px solid rgba(255,255,255,.1);}
-      .h-mini-table td{color:rgba(255,255,255,.85);padding:.25rem .4rem;border-bottom:1px solid rgba(255,255,255,.06);}
-      .h-section-label{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:rgba(255,255,255,.7);font-weight:600;margin-bottom:.4rem;}
 
       /* KPI */
       .kpi-val{font-size:1.5rem;font-weight:700;color:var(--brand);}
@@ -104,19 +84,11 @@
         .navbar{padding-top:.3rem;padding-bottom:.3rem;}
         /* solid bg when mobile menu is open */
         .navbar-collapse{background:var(--brand);border-radius:0 0 12px 12px;padding:.5rem .8rem;margin-top:.3rem;}
-        .idx-hero{padding-top:100px;padding-bottom:2rem;}
-        .idx-greeting h1{font-size:1.3rem;}
-        .idx-greeting p{font-size:.84rem;}
-        .h-metric{padding:.55rem .6rem;}
-        .h-metric .hm-value{font-size:1.05rem;}
-        .h-metric .hm-label{font-size:.58rem;}
-        .h-metric .hm-sub{font-size:.6rem;}
-        .h-chart-label{font-size:.6rem;}
         .s-hdr{font-size:.8rem;padding:.6rem .9rem;flex-wrap:wrap;}
         .s-hdr span:first-of-type:not(.s-icon){overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
         .s-body{padding:.8rem;}
         .kpi-val{font-size:1.2rem;}
-        .kpi-label{font-size:.6rem;}
+        .kpi-label{font-size:.72rem;}
         .kpi-sub{font-size:.72rem;}
         /* shrink chart containers on mobile */
         .s-card .s-body[style*="height:280px"]{height:200px !important;}
@@ -129,17 +101,14 @@
         .items-table th:nth-child(6),.items-table td:nth-child(6){display:none;}
         .items-table{font-size:.78rem;}
         /* section header */
-        .hdr-wrap h3{font-size:1.1rem !important;}
+        .hdr-wrap h2{font-size:1.1rem !important;}
       }
       @media(max-width:400px){
-        .h-metric .hm-value{font-size:.92rem;}
-        .h-metric{padding:.45rem .5rem;}
-        .idx-hero .row.g-2.mb-3 .col-4{padding-left:4px;padding-right:4px;}
         .kpi-val{font-size:1rem;}
       }
 
       /* nav pills */
-      .nav-pills-custom .nav-link{display:inline-flex;align-items:center;gap:6px;padding:.45rem .9rem;border-radius:8px;font-weight:700;font-size:.82rem;color:rgba(255,255,255,.7);border:1.5px solid transparent;transition:all .2s;}
+      .nav-pills-custom .nav-link{display:inline-flex;align-items:center;gap:6px;padding:.45rem .9rem;border-radius:8px;font-weight:700;font-size:.82rem;color:rgba(255,255,255,.7);border:1.5px solid transparent;transition:background-color .2s ease-out,color .2s ease-out,border-color .2s ease-out;}
       .nav-pills-custom .nav-link:hover{color:#fff;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);}
       .nav-pills-custom .nav-link.active{color:#fff;background:rgba(255,255,255,.18);border-color:rgba(255,255,255,.25);}
       .nav-pills-custom .nav-link i{font-size:.78rem;}
@@ -147,6 +116,45 @@
         .nav-pills-custom .nav-link{width:100%;padding:.6rem 1rem;font-size:.88rem;border-bottom:1px solid rgba(255,255,255,.08);border-radius:0;}
         .nav-pills-custom .nav-link:hover,.nav-pills-custom .nav-link.active{background:rgba(255,255,255,.1);border-radius:0;}
       }
+
+      /* Operational overview: a visible cycle, readable numbers and actionable queues. */
+      .idx-hero{background:var(--bg);padding:9rem 0 2rem;overflow:visible;}
+      .idx-hero::after{content:none;}
+      .overview-head{display:flex;align-items:flex-end;justify-content:space-between;gap:1.5rem;margin-bottom:1.5rem;}
+      .overview-kicker{margin:0 0 .35rem;color:#565c66;font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;}
+      .overview-head h1{margin:0;color:var(--brand);font-size:1.5rem;font-weight:800;line-height:1.2;}
+      .overview-intro{margin:.55rem 0 0;color:#49515a;font-size:.86rem;line-height:1.5;max-width:68ch;}
+      .overview-controls{display:flex;align-items:flex-end;gap:.75rem;flex-wrap:wrap;justify-content:flex-end;}
+      .cycle-form label{display:block;margin:0 0 .35rem;color:var(--brand);font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;}
+      .cycle-form-row{display:flex;gap:.5rem;}
+      .cycle-form .form-select{min-width:185px;min-height:42px;border-color:var(--border);border-radius:8px;color:var(--brand);font-weight:600;font-size:.86rem;}
+      .overview-controls>.btn-a{min-height:42px;}
+      .h-metric{height:100%;min-height:120px;padding:1.1rem;text-align:left;background:#fff;border:1px solid var(--border);box-shadow:none;}
+      .h-metric .hm-label{color:#565c66;font-size:.72rem;font-weight:700;letter-spacing:.04em;margin:0 0 .55rem;}
+      .h-metric .hm-value{color:var(--brand);font-size:1.5rem;font-weight:800;line-height:1.25;overflow-wrap:anywhere;}
+      .h-metric .hm-sub{color:#565c66;font-size:.72rem;line-height:1.4;margin-top:.55rem;}
+      .metric-unavailable{color:#6c757d;}
+      .overview-details{margin-top:.1rem;}
+      .overview-panel{height:100%;min-height:222px;padding:1.1rem;background:#fff;border:1px solid var(--border);border-radius:var(--radius);}
+      .overview-panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:.5rem;margin-bottom:.8rem;}
+      .overview-panel h2{margin:0;color:var(--brand);font-size:.88rem;font-weight:700;line-height:1.4;}
+      .overview-panel-head a{color:#14563a;font-size:.76rem;font-weight:700;text-align:right;text-decoration:underline;text-underline-offset:2px;white-space:nowrap;}
+      .overview-note{margin:.4rem 0 0;color:#565c66;font-size:.76rem;line-height:1.5;}
+      .overview-empty-title{margin:1.1rem 0 .2rem;color:var(--brand);font-size:1.1rem;font-weight:700;}
+      .goal-figure{margin:1.25rem 0 .65rem;color:var(--brand);font-size:1.5rem;font-weight:800;}
+      .goal-figure span{font-size:.76rem;font-weight:500;color:#565c66;}
+      .overview-panel .progress{height:.65rem;background:#e9ecef;}
+      .status-summary,.attention-list{padding:0;margin:.55rem 0 0;list-style:none;}
+      .status-summary li,.attention-list li{border-bottom:1px solid #edf0f2;}
+      .status-summary li{display:flex;justify-content:space-between;gap:1rem;padding:.42rem 0;color:#374151;font-size:.82rem;}
+      .status-summary li strong{color:var(--brand);font-weight:800;}
+      .attention-label{margin:1rem 0 .2rem;color:var(--brand);font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;}
+      .attention-label.danger{color:#a72424;}
+      .attention-list a{display:flex;justify-content:space-between;gap:.5rem;padding:.48rem 0;color:var(--brand);font-size:.8rem;text-decoration:none;}
+      .attention-list a:hover{text-decoration:underline;}
+      .attention-list a span:first-child{min-width:0;overflow-wrap:anywhere;}
+      @media(max-width:991px){.overview-head{align-items:flex-start;flex-direction:column;}.overview-controls{justify-content:flex-start;}}
+      @media(max-width:575px){.idx-hero{padding:6.2rem 0 1.5rem;}.overview-controls,.cycle-form{width:100%;}.cycle-form-row .form-select{min-width:0;flex:1;}.h-metric{min-height:115px;padding:.85rem;}.h-metric .hm-value{font-size:1.15rem;}.overview-panel{min-height:0;}}
 
       {% if user.is_authenticated %}
       .navbar-nav .nav-item.dropdown:hover>.dropdown-menu{display:block;}
@@ -159,10 +167,11 @@
 
 
   <body>
+    <a class="visually-hidden-focusable position-absolute top-0 start-0 m-2 bg-white text-dark p-2" href="#home-title">Pular para o conteúdo</a>
     <main class="main" id="top">
       <nav class="navbar navbar-expand-lg fixed-top navbar-dark" data-navbar-on-scroll="data-navbar-on-scroll">
-        <div class="container"><a class="navbar-brand" href="{% url 'core:index' %}"><img src="{% static 'assets/img/Logo.png' %}?v=2" alt="Roselar — Início" style="height: 80px;" /></a>
-          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation"><i class="fa-solid fa-bars text-white fs-3"></i></button>
+        <div class="container"><a class="navbar-brand" href="{% url 'core:index' %}"><img src="{% static 'assets/img/Logo.png' %}?v=2" alt="Roselar — Início" width="133" height="40" /></a>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Abrir navegação"><i class="fa-solid fa-bars text-white fs-3" aria-hidden="true"></i></button>
           <div class="collapse navbar-collapse" id="navbarSupportedContent">
             <ul class="navbar-nav ms-auto nav-pills-custom">
               <li class="nav-item"><a class="nav-link active" href="{% url 'core:index' %}"><i class="fa-solid fa-house"></i>Início</a></li>
@@ -253,89 +262,8 @@
       </script>
       {% endif %}
 
-      <!-- ═══════════ HERO ═══════════ -->
-      <div class="idx-hero">
-        <div class="container">
-          {% if user.is_authenticated %}
-          <div class="row align-items-center">
-            <div class="col-lg-5 mb-4 mb-lg-0 idx-greeting">
-              <h1>Olá, {{ user.username|capfirst }}!</h1>
-              <p>Acompanhe seus resultados e gerencie seus orçamentos em tempo real.</p>
-              <div class="hdr-btns">
-                <a href="{% url 'sales:quote_create' %}" class="btn-a primary"><i class="fa-solid fa-plus"></i>Novo Orçamento</a>
-                <a href="{% url 'calendar_app:calendar' %}" class="btn-a g-outline"><i class="fa-solid fa-calendar"></i>Calendário</a>
-                {% if user.is_staff and is_admin %}<a href="{% url 'admin:index' %}" class="btn-a g-outline"><i class="fa-solid fa-screwdriver-wrench"></i>Admin</a>{% endif %}
-              </div>
-            </div>
-            <div class="col-lg-7">
-              <!-- Metric pills -->
-              <div class="row g-2 mb-3">
-                <div class="col-6 col-md-3"><div class="h-metric"><div class="hm-label">Vendas</div><div class="hm-value green">R$ {{ my_total_sold_month|floatformat:0 }}</div><div class="hm-sub">Ant: R$ {{ prev_total|floatformat:0 }}</div></div></div>
-                <div class="col-6 col-md-3"><div class="h-metric"><div class="hm-label">Orçamentos</div><div class="hm-value">{{ my_quotes_count_month }}</div><div class="hm-sub">Conv: {{ my_converted_count_month }}</div></div></div>
-                <div class="col-6 col-md-3"><div class="h-metric"><div class="hm-label">Conversão</div><div class="hm-value {% if my_conversion_rate >= 50 %}green{% endif %}">{{ my_conversion_rate }}%</div><div class="hm-sub">Desc: {{ avg_discount }}%</div></div></div>
-                <div class="col-6 col-md-3"><div class="h-metric"><div class="hm-label">Ticket Médio</div><div class="hm-value">R$ {{ my_avg_ticket|floatformat:0 }}</div></div></div>
-              </div>
-              <!-- Mini charts row -->
-              <div class="row g-2 mb-3">
-                <div class="col-4 text-center">
-                  <div class="h-chart-label"><i class="fa-solid fa-bullseye me-1"></i>Meta</div>
-                  <div style="height:110px;position:relative;"><canvas id="heroGoalPie"></canvas><div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;font-weight:700;font-size:.85rem;">{{ goal_pct_raw }}%</div></div>
-                </div>
-                <div class="col-4 text-center">
-                  <div class="h-chart-label"><i class="fa-solid fa-chart-pie me-1"></i>Conversão</div>
-                  <div style="height:110px;position:relative;"><canvas id="heroConvPie"></canvas><div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;font-weight:700;font-size:.85rem;">{{ my_conversion_rate }}%</div></div>
-                </div>
-                <div class="col-4 text-center">
-                  <div class="h-chart-label"><i class="fa-solid fa-file-circle-check me-1"></i>Status</div>
-                  <div style="height:110px;"><canvas id="heroStatusPie"></canvas></div>
-                </div>
-              </div>
-              <!-- Pending + Overdue -->
-              {% if pending_quotes or overdue_events %}
-              <div class="row g-2">
-                {% if pending_quotes %}
-                <div class="{% if overdue_events %}col-6{% else %}col-12{% endif %}">
-                  <div class="h-section-label"><i class="fa-solid fa-file-invoice me-1"></i>Pendentes</div>
-                  <table class="h-mini-table">{% for q in pending_quotes %}<tr><td>{{ q.number }}</td><td>{{ q.customer.name|truncatechars:18 }}</td></tr>{% endfor %}</table>
-                </div>
-                {% endif %}
-                {% if overdue_events %}
-                <div class="{% if pending_quotes %}col-6{% else %}col-12{% endif %}">
-                  <div class="h-section-label" style="color:#EF9A9A;"><i class="fa-solid fa-exclamation-triangle me-1"></i>Atrasados</div>
-                  <table class="h-mini-table">{% for ev in overdue_events %}<tr><td style="color:#EF9A9A;">{{ ev.event_date|date:"d/m" }}</td><td>{{ ev.title|truncatechars:18 }}</td></tr>{% endfor %}</table>
-                </div>
-                {% endif %}
-              </div>
-              {% endif %}
-              <!-- Admin team row -->
-              {% if is_admin %}
-              <div class="row g-2 mt-2 pt-2" style="border-top:1px solid rgba(255,255,255,.1);">
-                <div class="col-4"><div class="h-metric"><div class="hm-label">Equipe Vendas</div><div class="hm-value green" style="font-size:1.1rem;">R$ {{ team_total_sold_month|floatformat:0 }}</div></div></div>
-                <div class="col-4"><div class="h-metric"><div class="hm-label">Orçamentos</div><div class="hm-value" style="font-size:1.1rem;">{{ team_quotes_month }}</div></div></div>
-                <div class="col-4"><div class="h-metric"><div class="hm-label">Conv. Equipe</div><div class="hm-value" style="font-size:1.1rem;">{{ team_conversion_rate }}%</div></div></div>
-              </div>
-              {% if seller_ranking %}
-              <div class="h-section-label mt-2"><i class="fa-solid fa-trophy me-1"></i>Ranking</div>
-              <table class="h-mini-table"><thead><tr><th>#</th><th>Vendedor</th><th>Total</th></tr></thead><tbody>{% for s in seller_ranking %}<tr><td>{{ forloop.counter }}</td><td>{{ s.seller__username }}</td><td class="fw-bold">R$ {{ s.total|floatformat:0 }}</td></tr>{% endfor %}</tbody></table>
-              {% endif %}
-              {% endif %}
-            </div>
-          </div>
-          {% else %}
-          <div class="row align-items-center py-6">
-            <div class="col-lg-5 text-center text-lg-start idx-greeting">
-              <h1>Lorem ipsum dolor sit amet</h1>
-              <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
-              <a href="{% url 'accounts:login' %}" class="btn-a primary">Entrar</a>
-              <button class="btn-a g-outline ms-2">Explorar</button>
-            </div>
-            <div class="col-lg-7 mt-3 mt-lg-0">
-              <img class="img-fluid" src="{% static 'assets/img/hero/hero-graphics.png' %}" alt="" />
-            </div>
-          </div>
-          {% endif %}
-        </div>
-      </div>
+      {% include 'core/_home_overview.html' %}
+
 
       <!-- ═══════════ MAIN CONTENT ═══════════ -->
 
@@ -370,8 +298,8 @@
           <!-- Section header -->
           <div class="hdr-wrap mb-4">
             <div>
-              <h3 style="font-weight:800;color:var(--brand);margin:0;"><i class="fa-solid fa-chart-pie me-2"></i>Central de Análises</h3>
-              <span style="color:var(--muted);font-size:.85rem;">Visão gerencial completa — dados do mês atual</span>
+              <h2 style="font-weight:800;color:var(--brand);margin:0;"><i class="fa-solid fa-chart-pie me-2" aria-hidden="true"></i>Central de Análises</h2>
+              <span style="color:var(--muted);font-size:.85rem;">Equipe · ciclo de {{ cycle_start|date:"d/m/Y" }} a {{ cycle_end|date:"d/m/Y" }}</span>
             </div>
             <div class="hdr-btns">
               <a href="{% url 'core:reports_hub' %}" class="btn-a outline"><i class="fa-solid fa-file-export"></i>Relatórios</a>
@@ -383,22 +311,22 @@
             <div class="col-6 col-md-3">
               <div class="s-card"><div class="s-body text-center py-3">
                 <div class="kpi-label"><i class="fa-solid fa-dollar-sign me-1"></i>Receita Total</div>
-                <div class="kpi-val green">R$ {{ team_total_sold_month|floatformat:0 }}</div>
-                <div class="kpi-sub">{{ team_quotes_month }} orçamentos no mês</div>
+                <div class="kpi-val green">R$ {{ team_total_sold_month|floatformat:'0g' }}</div>
+                <div class="kpi-sub">{{ team_converted_month }} venda{{ team_converted_month|pluralize }} no ciclo</div>
               </div></div>
             </div>
             <div class="col-6 col-md-3">
               <div class="s-card"><div class="s-body text-center py-3">
                 <div class="kpi-label"><i class="fa-solid fa-percent me-1"></i>Conversão Geral</div>
-                <div class="kpi-val {% if team_conversion_rate >= 50 %}green{% elif team_conversion_rate < 20 %}red{% endif %}">{{ team_conversion_rate }}%</div>
-                <div class="kpi-sub">Equipe completa</div>
+                <div class="kpi-val">{% if team_quotes_month %}{{ team_conversion_rate }}%{% else %}—{% endif %}</div>
+                <div class="kpi-sub">{% if team_quotes_month %}{{ team_quotes_month }} orçamentos criados{% else %}Sem orçamentos no ciclo{% endif %}</div>
               </div></div>
             </div>
             <div class="col-6 col-md-3">
               <div class="s-card"><div class="s-body text-center py-3">
                 <div class="kpi-label"><i class="fa-solid fa-users me-1"></i>Vendedores Ativos</div>
                 <div class="kpi-val">{{ seller_ranking|length }}</div>
-                <div class="kpi-sub">Com vendas este mês</div>
+                <div class="kpi-sub">Com vendas no ciclo</div>
               </div></div>
             </div>
             <div class="col-6 col-md-3">
@@ -407,7 +335,7 @@
                 <div class="kpi-label"><i class="fa-solid fa-bullseye me-1"></i>Meta Coletiva</div>
                 <div class="kpi-val {% if collective_goal_pct >= 100 %}green{% endif %}">{{ collective_goal_pct }}%</div>
                 <div class="kpi-goal-bar mt-1"><div class="fill" style="width:{{ collective_goal_pct|unlocalize }}%;"></div></div>
-                <div class="kpi-sub mt-1">R$ {{ team_total_sold_month|floatformat:0 }} / R$ {{ collective_goal|floatformat:0 }}</div>
+                <div class="kpi-sub mt-1">R$ {{ team_total_sold_month|floatformat:'0g' }} / R$ {{ collective_goal|floatformat:'0g' }}</div>
                 {% else %}
                 <div class="kpi-label"><i class="fa-solid fa-bullseye me-1"></i>Meta Coletiva</div>
                 <div class="kpi-val" style="font-size:1rem;color:var(--muted);">Não definida</div>
@@ -420,14 +348,14 @@
           <div class="row g-3 mb-4">
             <div class="col-lg-8">
               <div class="s-card">
-                <div class="s-hdr"><span class="s-icon brand"><i class="fa-solid fa-chart-line"></i></span><span>Evolução de Vendas da Equipe</span><span class="ms-auto" style="font-weight:400;font-size:.72rem;color:var(--muted);">Últimos 6 meses</span></div>
-                <div class="s-body" style="height:280px;"><canvas id="biTeamEvolution"></canvas></div>
+                <div class="s-hdr"><span class="s-icon brand"><i class="fa-solid fa-chart-line"></i></span><span>Evolução de Vendas da Equipe</span><span class="ms-auto" style="font-weight:400;font-size:.72rem;color:var(--muted);">Últimos 6 ciclos</span></div>
+                <div class="s-body" style="height:{% if bi_team_has_sales %}280{% else %}140{% endif %}px;{% if not bi_team_has_sales %}display:flex;align-items:center;justify-content:center;{% endif %}">{% if bi_team_has_sales %}<canvas id="biTeamEvolution" role="img" aria-label="Evolução das vendas da equipe nos últimos seis ciclos"></canvas>{% else %}<p class="overview-empty-title text-center">Sem vendas nos últimos seis ciclos</p>{% endif %}</div>
               </div>
             </div>
             <div class="col-lg-4">
               <div class="s-card">
                 <div class="s-hdr"><span class="s-icon blue"><i class="fa-solid fa-circle-half-stroke"></i></span><span>Status dos Orçamentos</span></div>
-                <div class="s-body d-flex align-items-center justify-content-center" style="height:280px;"><canvas id="biStatusPie"></canvas></div>
+                <div class="s-body d-flex align-items-center justify-content-center" style="height:{% if team_quotes_month %}280{% else %}140{% endif %}px;">{% if team_quotes_month %}<canvas id="biStatusPie" role="img" aria-label="Distribuição de status dos orçamentos no ciclo"></canvas>{% else %}<p class="overview-empty-title text-center">Sem orçamentos no ciclo</p>{% endif %}</div>
               </div>
             </div>
           </div>
@@ -436,8 +364,8 @@
           <div class="row g-3 mb-4">
             <div class="col-lg-12">
               <div class="s-card">
-                <div class="s-hdr"><span class="s-icon orange"><i class="fa-solid fa-ranking-star"></i></span><span>Vendas por Vendedor</span><span class="ms-auto" style="font-weight:400;font-size:.72rem;color:var(--muted);">Mês atual</span></div>
-                <div class="s-body" style="height:260px;"><canvas id="biSellerBar"></canvas></div>
+                <div class="s-hdr"><span class="s-icon orange"><i class="fa-solid fa-ranking-star"></i></span><span>Vendas por Vendedor</span><span class="ms-auto" style="font-weight:400;font-size:.72rem;color:var(--muted);">Ciclo selecionado</span></div>
+                <div class="s-body" style="height:{% if seller_ranking %}260{% else %}110{% endif %}px;{% if not seller_ranking %}display:flex;align-items:center;justify-content:center;{% endif %}">{% if seller_ranking %}<canvas id="biSellerBar" role="img" aria-label="Vendas por vendedor no ciclo"></canvas>{% else %}<p class="overview-empty-title text-center">Sem vendas no ciclo</p>{% endif %}</div>
               </div>
             </div>
           </div>
@@ -456,13 +384,13 @@
                         <span class="fw-semibold" style="color:#374151;">{{ p.product_name|truncatechars:30 }}</span>
                       </div>
                       <div class="text-end">
-                        <span class="fw-bold" style="color:var(--brand);">R$ {{ p.total_revenue|floatformat:0 }}</span>
+                        <span class="fw-bold" style="color:var(--brand);">R$ {{ p.total_revenue|floatformat:'0g' }}</span>
                         <span class="prod-badge">{{ p.total_qty }}un</span>
                       </div>
                     </div>
                     {% endfor %}
                   {% else %}
-                    <p class="text-muted text-center mb-0 py-4">Nenhum produto vendido este mês</p>
+                    <p class="text-muted text-center mb-0 py-4">Nenhum produto vendido neste ciclo</p>
                   {% endif %}
                 </div>
               </div>
@@ -470,14 +398,14 @@
             <div class="col-lg-7">
               <div class="s-card">
                 <div class="s-hdr"><span class="s-icon red"><i class="fa-solid fa-tags"></i></span><span>Desconto Médio por Vendedor</span></div>
-                <div class="s-body" style="height:280px;"><canvas id="biDiscountBar"></canvas></div>
+                <div class="s-body" style="height:{% if bi_discount_has_data %}280{% else %}140{% endif %}px;{% if not bi_discount_has_data %}display:flex;align-items:center;justify-content:center;{% endif %}">{% if bi_discount_has_data %}<canvas id="biDiscountBar" role="img" aria-label="Desconto médio por vendedor no ciclo"></canvas>{% else %}<p class="overview-empty-title text-center">Sem descontos nas vendas do ciclo</p>{% endif %}</div>
               </div>
             </div>
           </div>
 
           <!-- Seller Ranking Table -->
           <div class="s-card">
-            <div class="s-hdr"><span class="s-icon brand"><i class="fa-solid fa-trophy"></i></span><span>Ranking Detalhado — Mês Atual</span></div>
+            <div class="s-hdr"><span class="s-icon brand"><i class="fa-solid fa-trophy"></i></span><span>Ranking Detalhado — Ciclo Selecionado</span></div>
             <div class="s-body">
               {% if seller_ranking %}
               <div class="table-responsive">
@@ -503,7 +431,7 @@
                       </td>
                       <td class="fw-semibold">{{ s.seller__username }}</td>
                       <td class="text-end">{{ s.count }}</td>
-                      <td class="text-end fw-bold" style="color:var(--green);">R$ {{ s.total|floatformat:0 }}</td>
+                      <td class="text-end fw-bold" style="color:var(--green);">R$ {{ s.total|floatformat:'0g' }}</td>
                       <td class="text-end">R$ {% widthratio s.total s.count 1 %}</td>
                       <td class="text-center">{% if team_total_sold_month %}{% widthratio s.total team_total_sold_month 100 %}%{% else %}0%{% endif %}</td>
                     </tr>
@@ -512,7 +440,7 @@
                 </table>
               </div>
               {% else %}
-                <p class="text-muted text-center mb-0 py-3">Nenhuma venda registrada este mês</p>
+                <p class="text-muted text-center mb-0 py-3">Nenhuma venda registrada neste ciclo</p>
               {% endif %}
             </div>
           </div>
@@ -551,40 +479,6 @@
           </div>
         </div>
       </section>
-      {% else %}
-      <!-- Not authenticated: services -->
-      <section style="padding:3rem 0;background:var(--bg);">
-        <div class="container">
-          <p class="text-center fs-1">Our Services</p>
-          <h2 class="mx-auto text-center fs-lg-6 fs-md-5 w-lg-75">Lorem ipsum dolor sit amet consectetur adipiscing elit.</h2>
-          <div class="row gx-xl-7 mt-5">
-            <div class="col-md-4 mb-5 mb-md-0 text-center text-md-start">
-              <div class="s-card"><div class="s-body">
-                <img class="w-75 w-sm-50 w-md-100 mb-3" src="{% static 'assets/img/services/1.png' %}" alt="" />
-                <h4>Título de recurso legal</h4>
-                <p class="fs-1">Curva de aprendizado, efeitos de rede, retorno sobre investimento.</p>
-                <a class="btn-a dark" href="#">Explorar página<i class="fa-solid fa-arrow-right ms-2"></i></a>
-              </div></div>
-            </div>
-            <div class="col-md-4 mb-5 mb-md-0 text-center text-md-start">
-              <div class="s-card"><div class="s-body">
-                <img class="w-75 w-sm-50 w-md-100 mb-3" src="{% static 'assets/img/services/2.png' %}" alt="" />
-                <h4>Even cooler feature</h4>
-                <p class="fs-1">Lorem ipsum dolor sit amet, consectetur adipiscing elit.</p>
-                <a class="btn-a dark" href="#">Explore page<i class="fa-solid fa-arrow-right ms-2"></i></a>
-              </div></div>
-            </div>
-            <div class="col-md-4 mb-5 mb-md-0 text-center text-md-start">
-              <div class="s-card"><div class="s-body">
-                <img class="w-75 w-sm-50 w-md-100 mb-3" src="{% static 'assets/img/services/3.png' %}" alt="" />
-                <h4>Título de recurso legal</h4>
-                <p class="fs-1">Curva de aprendizado, efeitos de rede, retorno sobre investimento.</p>
-                <a class="btn-a dark" href="#">Explorar página<i class="fa-solid fa-arrow-right ms-2"></i></a>
-              </div></div>
-            </div>
-          </div>
-        </div>
-      </section>
       {% endif %}
 
 
@@ -613,57 +507,6 @@
         }
       }
 
-      // ── Hero Doughnut: Goal Progress ──
-      var goalEl = document.getElementById('heroGoalPie');
-      if (goalEl) {
-        var goalPct = {{ goal_pct_raw|unlocalize }};
-        var remaining = Math.max(100 - goalPct, 0);
-        safeChart(goalEl.getContext('2d'), {
-          type: 'doughnut',
-          data: {
-            labels: ['Atingido', 'Restante'],
-            datasets: [{ data: [Math.min(goalPct, 100), remaining], backgroundColor: ['#5CBE8F', 'rgba(255,255,255,0.12)'], borderWidth: 0 }]
-          },
-          options: { responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { display: false }, tooltip: { callbacks: { label: function(c) { return c.label + ': ' + c.raw + '%'; } } } } }
-        });
-      }
-
-      // ── Hero Doughnut: Conversion Rate ──
-      var convEl = document.getElementById('heroConvPie');
-      if (convEl) {
-        var convRate = {{ my_conversion_rate|unlocalize }};
-        var convRem = Math.max(100 - convRate, 0);
-        safeChart(convEl.getContext('2d'), {
-          type: 'doughnut',
-          data: {
-            labels: ['Convertidos', 'Não convertidos'],
-            datasets: [{ data: [convRate, convRem], backgroundColor: ['#4A93FE', 'rgba(255,255,255,0.12)'], borderWidth: 0 }]
-          },
-          options: { responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { display: false }, tooltip: { callbacks: { label: function(c) { return c.label + ': ' + c.raw + '%'; } } } } }
-        });
-      }
-
-      // ── Hero Pie: Quote Status Breakdown ──
-      var statusEl = document.getElementById('heroStatusPie');
-      if (statusEl) {
-        var statusLabels = {{ my_status_labels_json|safe }};
-        var statusValues = {{ my_status_values_json|safe }};
-        var statusColors = ['#5CBE8F', '#4A93FE', '#EE9E55', '#EF9A9A', '#A3BFD6', '#AEB4BD'];
-        safeChart(statusEl.getContext('2d'), {
-          type: 'pie',
-          data: {
-            labels: statusLabels,
-            datasets: [{ data: statusValues, backgroundColor: statusColors.slice(0, statusLabels.length), borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' }]
-          },
-          options: {
-            responsive: true, maintainAspectRatio: false,
-            plugins: {
-              legend: { position: 'bottom', labels: { color: 'rgba(255,255,255,0.7)', font: { size: 9 }, usePointStyle: true, pointStyle: 'circle', padding: 6 } },
-              tooltip: { callbacks: { label: function(c) { return c.label + ': ' + c.raw; } } }
-            }
-          }
-        });
-      }
 
       {% if is_admin %}
       // BI: Team Evolution (line + bar combo)

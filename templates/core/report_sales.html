@@ -14,11 +14,12 @@
   <style>:root{--brand:#111418;}body{font-variant-numeric:tabular-nums;font-family:'Manrope',sans-serif;}input::placeholder,textarea::placeholder{color:#565C66;opacity:1;}</style>
 </head>
 <body>
-  <main class="main" id="top">
+  <a class="visually-hidden-focusable position-absolute top-0 start-0 m-2 bg-white text-dark p-2" href="#report-content">Pular para o conteúdo</a>
+  <main class="main" id="report-content" tabindex="-1">
     <nav class="navbar navbar-expand-lg fixed-top navbar-dark" data-navbar-on-scroll="data-navbar-on-scroll">
       <div class="container">
-        <a class="navbar-brand" href="{% url 'core:index' %}"><img src="{% static 'assets/img/Logo.png' %}?v=2" alt="Roselar — Início" style="height:40px;"></a>
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent"><i class="fa-solid fa-bars text-white fs-3"></i></button>
+        <a class="navbar-brand" href="{% url 'core:index' %}"><img src="{% static 'assets/img/Logo.png' %}?v=2" alt="Roselar — Início" width="133" height="40"></a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Abrir navegação"><i class="fa-solid fa-bars text-white fs-3" aria-hidden="true"></i></button>
         <div class="collapse navbar-collapse" id="navbarSupportedContent">
           <ul class="navbar-nav ms-auto align-items-center">
             <li class="nav-item"><a class="nav-link" href="{% url 'core:dashboard' %}">Dashboard</a></li>
@@ -38,26 +39,27 @@
       <div class="container" style="margin-top:80px;">
         <div class="bg-white shadow-sm p-4 mb-4" style="border-radius:8px;">
           <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-            <div><a href="{% url 'core:reports_hub' %}" class="text-decoration-none" style="color:var(--brand);"><i class="fa-solid fa-arrow-left me-1"></i>Relatórios</a><h1 class="h4 fw-bold mt-1 mb-0" style="color:var(--brand);"><i class="fa-solid fa-dollar-sign me-2"></i>Relatório de Vendas</h1><div class="small fw-bold text-muted mt-1">{% if cycle_label %}{{ cycle_label }} &middot; {% endif %}{{ period_start|date:"d/m/Y" }} a {{ period_end|date:"d/m/Y" }}</div></div>
+            <div><a href="{% url 'core:reports_hub' %}" class="text-decoration-none" style="color:var(--brand);"><i class="fa-solid fa-arrow-left me-1" aria-hidden="true"></i>Relatórios</a><h1 class="h4 fw-bold mt-1 mb-0" style="color:var(--brand);text-wrap:balance;"><i class="fa-solid fa-dollar-sign me-2" aria-hidden="true"></i>Relatório de Vendas</h1><div class="small fw-bold text-muted mt-1">{% if cycle_label %}{{ cycle_label }} &middot; {% endif %}{{ period_start|date:"d/m/Y" }} a {{ period_end|date:"d/m/Y" }}</div></div>
             <form method="get" class="d-flex gap-2 align-items-end flex-wrap">
               {% include "core/_period_filter.html" %}
               <div><label for="seller" class="form-label small fw-bold mb-0">Vendedor</label><select id="seller" name="seller" class="form-control form-control-sm"><option value="">Todos</option>{% for s in sellers %}<option value="{{ s.id }}" {% if seller_id == s.id|stringformat:"d" %}selected{% endif %}>{{ s.username }}</option>{% endfor %}</select></div>
-              <button type="submit" class="btn btn-primary btn-sm"><i class="fa-solid fa-search me-1"></i>Filtrar</button>
-              <a href="{% url 'core:report_csv_export' %}?date_from={{ date_from }}&amp;date_to={{ date_to }}&amp;seller={{ seller_id }}" class="btn btn-outline-dark btn-sm"><i class="fa-solid fa-file-csv me-1"></i>Exportar CSV</a>
+              <button type="submit" class="btn btn-sm" style="background:#111418;color:#fff;border-color:#111418;"><i class="fa-solid fa-search me-1" aria-hidden="true"></i>Filtrar</button>
+              <a href="{% url 'core:report_csv_export' %}?date_from={{ date_from }}&amp;date_to={{ date_to }}&amp;seller={{ seller_id }}" class="btn btn-outline-dark btn-sm"><i class="fa-solid fa-file-csv me-1" aria-hidden="true"></i>Exportar CSV</a>
             </form>
           </div>
         </div>
 
         <div class="row g-3 mb-4">
-          <div class="col-md-4"><div class="bg-white border p-3 text-center" style="border-radius:8px;"><div style="font-size:.75rem;color:#6c757d;text-transform:uppercase;font-weight:600;">Total Vendido</div><div class="fw-bold fs-4" style="color:#198754;">R$ {{ total|floatformat:2 }}</div></div></div>
+          <div class="col-md-4"><div class="bg-white border p-3 text-center" style="border-radius:8px;"><div style="font-size:.75rem;color:#6c757d;text-transform:uppercase;font-weight:600;">Venda líquida</div><div class="fw-bold fs-4" style="color:#198754;">R$ {{ total|floatformat:'2g' }}</div><div class="small text-muted">Frete abatido não entra</div></div></div>
           <div class="col-md-4"><div class="bg-white border p-3 text-center" style="border-radius:8px;"><div style="font-size:.75rem;color:#6c757d;text-transform:uppercase;font-weight:600;">Vendas</div><div class="fw-bold fs-4" style="color:var(--brand);">{{ count }}</div></div></div>
-          <div class="col-md-4"><div class="bg-white border p-3 text-center" style="border-radius:8px;"><div style="font-size:.75rem;color:#6c757d;text-transform:uppercase;font-weight:600;">Ticket Médio</div><div class="fw-bold fs-4" style="color:var(--brand);">R$ {{ avg_value|floatformat:2 }}</div></div></div>
+          <div class="col-md-4"><div class="bg-white border p-3 text-center" style="border-radius:8px;"><div style="font-size:.75rem;color:#6c757d;text-transform:uppercase;font-weight:600;">Ticket Médio</div><div class="fw-bold fs-4" style="color:var(--brand);">R$ {{ avg_value|floatformat:'2g' }}</div></div></div>
         </div>
 
         <div class="bg-white shadow-sm" style="border-radius:8px;overflow:hidden;">
+          <div class="d-md-none small fw-bold px-3 pt-3" style="color:#6c757d;"><i class="fa-solid fa-arrow-right me-1" aria-hidden="true"></i>Deslize a tabela para ver frete e venda líquida.</div>
           <div class="table-responsive">
-            <table class="table table-hover mb-0" style="font-size:.85rem;">
-              <thead style="background:var(--brand);color:#fff;"><tr><th>Nº</th><th>Data</th><th>Cliente</th><th>Vendedor</th><th>Desconto</th><th class="text-end">Total</th></tr></thead>
+            <table class="table table-hover mb-0" style="font-size:.85rem;font-variant-numeric:tabular-nums;">
+              <thead style="background:var(--brand);color:#fff;"><tr><th>Nº</th><th>Data</th><th>Cliente</th><th>Vendedor</th><th>Desconto</th><th class="text-end">Frete abatido</th><th class="text-end">Venda líquida</th></tr></thead>
               <tbody>
                 {% for q in quotes %}
                 <tr>
@@ -66,10 +68,11 @@
                   <td>{{ q.customer.name|truncatechars:35 }}</td>
                   <td>{{ q.seller.username }}</td>
                   <td>{{ q.discount_percent }}%</td>
-                  <td class="text-end fw-bold">R$ {{ q.total_value_snapshot|floatformat:2 }}</td>
+                  <td class="text-end">{% if q.freight_commission_deduction %}− R$ {{ q.freight_commission_deduction|floatformat:'2g' }}{% else %}—{% endif %}</td>
+                  <td class="text-end fw-bold">R$ {{ q.net_sales_value|floatformat:'2g' }}</td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="6" class="text-center text-muted py-4">Nenhuma venda encontrada no período. <a href="{{ prev_cycle_qs }}" class="fw-bold text-decoration-underline" style="color:var(--brand);">Ver {{ prev_cycle_label }}</a></td></tr>
+                <tr><td colspan="7" class="text-center text-muted py-4">Nenhuma venda encontrada no período. <a href="{{ prev_cycle_qs }}" class="fw-bold text-decoration-underline" style="color:var(--brand);">Ver {{ prev_cycle_label }}</a></td></tr>
                 {% endfor %}
               </tbody>
             </table>

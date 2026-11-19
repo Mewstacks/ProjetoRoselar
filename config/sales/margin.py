@@ -223,6 +223,8 @@ def _build_simulation_context(
     freight_commission_deduction: Decimal | None = None,
     manual_fee_percent: Decimal | None = None,
     manual_fee_percent_2: Decimal | None = None,
+    freight_embedded: bool = False,
+    cash_only: bool = False,
 ) -> dict:
     """Wrapper que organiza os inputs do request e injeta no Motor de Margem.
 
@@ -242,6 +244,13 @@ def _build_simulation_context(
     MARGIN_BASE      = Decimal("12")
     COMMISSION_FLOOR = Decimal("3")
     ARQUITETO_PCT    = Decimal("5")  # 5% sobre valor ajustado líquido da margem de 12%
+
+    if cash_only:
+        sim_installments = 1
+        sim_payment_type_2 = ""
+        sim_installments_2 = 1
+        sim_split_amount = None
+        down_payment_value = None
 
     # Higienização de Inputs
     subtotal      = max(Decimal("0"), Decimal(str(subtotal or 0)))
@@ -292,7 +301,7 @@ def _build_simulation_context(
     # Usa a maior taxa para garantir que a pior perna ainda cobre o frete exato.
     taxa_maxima        = max(fee_1, fee_2)
     taxa_decimal_frete = taxa_maxima / Decimal("100")
-    if taxa_decimal_frete < Decimal("1") and freight_value > 0:
+    if not freight_embedded and taxa_decimal_frete < Decimal("1") and freight_value > 0:
         freight_cobrado = freight_value / (Decimal("1") - taxa_decimal_frete)
     else:
         freight_cobrado = freight_value
@@ -651,6 +660,9 @@ def _build_simulation_context(
         'discount_value':           discount_value,
         'total_after_discount':     final_total,
         'final_total':               final_total,
+        'net_sales_value':           max(
+            Decimal("0"), final_total - freight_commission_deduction
+        ).quantize(Decimal("0.01")),
         'financed_value':           financed_value,
         'valor_avista':             valor_avista,
 
@@ -745,7 +757,7 @@ def simulate_quote(quote) -> dict:
     que o vendedor enxerga — mesmo subtotal, mesmo frete faturável, mesmas pernas
     de pagamento, mesma entrada.
     """
-    from sales.models import PaymentTerms, PriceTier
+    from sales.models import PriceTier
 
     # Migrações históricas 0028/0029 usam o modelo real antes de campos mais
     # novos existirem fisicamente. Ler de __dict__ mantém o backfill compatível
@@ -755,16 +767,13 @@ def simulate_quote(quote) -> dict:
         if quote.dual_pricing
         else PriceTier.RETAIL
     )
-    sold_cash = (
-        "total_cash_override" in quote.__dict__
-        and quote.__dict__.get("selected_payment_terms") == PaymentTerms.CASH
-        and quote.effective_cash_override is not None
-    )
     return _build_simulation_context(
         subtotal=quote.calculate_subtotal_for_tier(selected_tier),
         # Frete por conta da loja (STORE) não é repassado ao cliente: fica fora
         # do total e, portanto, fora da base de comissão.
-        freight_value=quote.billable_freight,
+        freight_value=quote.billable_freight_for_tier(selected_tier),
+        freight_embedded=quote.embeds_freight,
+        cash_only=selected_tier == PriceTier.RETAIL and quote.cash_only,
         sim_payment_type=quote.payment_type or "",
         sim_has_architect=quote.has_architect,
         # Atacado já é uma tabela reduzida; o desconto comercial pertence
@@ -789,7 +798,7 @@ def simulate_quote(quote) -> dict:
         # à vista: o preço à vista é o valor da venda, então é ele que vira a
         # base de margem e comissão.
         total_override=(
-            (quote.effective_cash_override if sold_cash else quote.effective_total_override)
+            quote.retail_override_for_terms()
             if selected_tier == PriceTier.RETAIL
             and "total_override" in quote.__dict__
             else None

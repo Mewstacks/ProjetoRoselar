@@ -1,6 +1,8 @@
 from django.shortcuts import redirect
 from django.urls import reverse
 
+from accounts.session import renew_remembered_session
+
 
 # URL prefixes that are always public (no login required)
 PUBLIC_PREFIXES = [
@@ -23,4 +25,6 @@ class LoginRequiredMiddleware:
             if not any(path.startswith(prefix) for prefix in PUBLIC_PREFIXES):
                 login_url = reverse('accounts:login')
                 return redirect(f'{login_url}?next={path}')
+        else:
+            renew_remembered_session(request.session)
         return self.get_response(request)

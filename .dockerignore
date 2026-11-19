@@ -8,6 +8,7 @@ venv
 *.pyc
 *.png
 db.sqlite3
+qa_review.sqlite3
 data_dump.json
 media
 staticfiles

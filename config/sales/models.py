@@ -249,6 +249,10 @@ class Quote(models.Model):
     )
     
     # frete
+    freight_percent = models.DecimalField(
+        max_digits=7, decimal_places=2, null=True, blank=True, verbose_name="Frete (%)",
+    )
+    freight_embedded = models.BooleanField(default=False, verbose_name="Embutir nos produtos")
     freight_value = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"), verbose_name="Valor do Frete")
     freight_responsible = models.CharField(
         max_length=10,
@@ -538,17 +542,52 @@ class Quote(models.Model):
         subtotal = sum(item.line_total_wholesale for item in self.items.all())
         return Decimal(str(subtotal))
 
-    @property
-    def billable_freight(self) -> Decimal:
-        """Frete efetivamente repassado ao cliente.
+    def freight_allocations(self, tier=None, items=None):
+        """Frete por linha na tabela de preço indicada, em centavos."""
+        tier = tier or self.selected_price_tier
+        wholesale = self.dual_pricing and tier == PriceTier.WHOLESALE
+        items = list(self.items.all() if items is None else items)
+        weights = [
+            max(Decimal("0"), item.line_total_wholesale if wholesale else item.line_total)
+            for item in items
+        ]
+        cent = Decimal("0.01")
+        percent = self.__dict__.get("freight_percent")
+        if percent is not None:
+            return [(value * percent / 100).quantize(cent, rounding=ROUND_HALF_UP)
+                    for value in weights]
+        total = sum(weights)
+        freight = self.freight_value or Decimal("0")
+        if not total or not freight:
+            return [Decimal("0.00")] * len(items)
+        allocated = previous = Decimal("0")
+        shares = []
+        for value in weights:
+            allocated += value
+            rounded = (freight * allocated / total).quantize(cent, rounding=ROUND_HALF_UP)
+            shares.append(rounded - previous)
+            previous = rounded
+        return shares
 
-        Quando o frete é 'Frete Próprio - Empresa' (STORE), a loja arca com o
-        custo e ele NÃO entra no total de venda ao cliente — caso contrário o
-        transporte inflaria o total e, com ele, a comissão do vendedor.
-        """
+    def freight_amount(self, tier=None):
+        if self.__dict__.get("freight_percent") is not None:
+            return sum(self.freight_allocations(tier), Decimal("0.00"))
+        return self.freight_value or Decimal("0.00")
+
+    def billable_freight_for_tier(self, tier):
         if self.freight_responsible == FreightResponsible.STORE:
             return Decimal("0.00")
-        return self.freight_value or Decimal("0.00")
+        return self.freight_amount(tier)
+
+    @property
+    def billable_freight(self):
+        return self.billable_freight_for_tier(self.__dict__.get("selected_price_tier", PriceTier.RETAIL))
+
+    @property
+    def embeds_freight(self):
+        return self.__dict__.get("freight_embedded", False) and (
+            self.freight_responsible == FreightResponsible.CARRIER
+        )
 
     def calculate_total_with_freight_and_discount(self, subtotal: Decimal = None) -> Decimal:
         """Calcula total com frete, ajuste de preço e desconto, mas SEM taxa de pagamento.
@@ -571,7 +610,7 @@ class Quote(models.Model):
         adj_subtotal = subtotal * (
             Decimal("1") + markup_pct / Decimal("100") - discount_pct / Decimal("100")
         )
-        return adj_subtotal + self.billable_freight
+        return adj_subtotal + self.billable_freight_for_tier(PriceTier.RETAIL)
     
     def calculate_payment_fee_value(self, base_total: Decimal | None = None) -> Decimal:
         """Calcula o custo bancário da modalidade efetivamente selecionada."""
@@ -612,10 +651,26 @@ class Quote(models.Model):
 
         Mesma leitura de effective_total_override: zero é ausência, não preço.
         """
-        override = self.total_cash_override
+        override = self.__dict__.get("total_cash_override")
         if override is None or override <= Decimal("0.00"):
             return None
         return override
+
+    @property
+    def cash_only(self):
+        return (
+            self.effective_cash_override is not None
+            and self.effective_total_override is None
+            and (
+                self.status not in SOLD_STATUSES
+                or self.selected_payment_terms == PaymentTerms.CASH
+            )
+        )
+
+    def retail_override_for_terms(self):
+        if self.cash_only or self.__dict__.get("selected_payment_terms") == PaymentTerms.CASH:
+            return self.effective_cash_override or self.effective_total_override
+        return self.effective_total_override
 
     def calculate_rounded_total_cash(self) -> Decimal | None:
         """Total à vista ao cliente, ou None quando o orçamento não oferece.
@@ -651,6 +706,8 @@ class Quote(models.Model):
         pagamento — igual ao snapshot), arredonda conforme o modo escolhido e
         soma o ajuste manual (pode ser negativo).
         """
+        if self.cash_only:
+            return self.effective_cash_override
         base = self.calculate_total_with_freight_and_discount()
         return self.apply_client_rounding(base)
 
@@ -671,7 +728,7 @@ class Quote(models.Model):
             markup_pct = self.price_increase_percent or Decimal("0.0")
         base = (
             subtotal * (Decimal("1") + markup_pct / Decimal("100"))
-            + self.billable_freight
+            + self.billable_freight_for_tier(PriceTier.WHOLESALE)
         )
         return self.apply_client_rounding(base, use_override=False)
 
@@ -694,15 +751,29 @@ class Quote(models.Model):
         tier = tier or self.selected_price_tier
         if self.dual_pricing and tier == PriceTier.WHOLESALE:
             return self.calculate_rounded_total_wholesale()
-        if self.selected_payment_terms == PaymentTerms.CASH:
+        if self.__dict__.get("selected_payment_terms") == PaymentTerms.CASH:
             cash_total = self.calculate_rounded_total_cash()
             if cash_total is not None:
                 return cash_total
         return self.calculate_rounded_total()
 
+    @property
+    def net_sales_value(self) -> Decimal:
+        """Valor interno da venda, sem o frete assumido pelo vendedor.
+
+        ``total_value_snapshot`` continua sendo o total cobrado do cliente e,
+        por isso, não pode ser alterado por um ajuste interno. Metas, rankings e
+        relatórios de venda usam esta leitura líquida. O piso em zero evita que
+        um lançamento incorreto de frete transforme uma venda em receita
+        negativa; a tela de simulação também impede salvar esse caso.
+        """
+        total = self.total_value_snapshot or Decimal("0.00")
+        freight = self.freight_commission_deduction or Decimal("0.00")
+        return max(Decimal("0.00"), total - freight)
+
     def calculate_list_value(self, tier: str | None = None) -> Decimal:
         """Valor de tabela: itens da modalidade + frete repassado ao cliente."""
-        return self.calculate_subtotal_for_tier(tier) + self.billable_freight
+        return self.calculate_subtotal_for_tier(tier) + self.billable_freight_for_tier(tier)
 
     def calculate_real_gap(
         self,
@@ -725,13 +796,22 @@ class Quote(models.Model):
             return Decimal("0.00"), Decimal("0.0")
         if total is None:
             total = self.calculate_total_for_tier(tier)
-        gap = (subtotal + self.billable_freight - total).quantize(
+        gap = (subtotal + self.billable_freight_for_tier(tier) - total).quantize(
             Decimal("0.01"), rounding=ROUND_HALF_UP
         )
         pct = (gap / subtotal * Decimal("100")).quantize(
             Decimal("0.1"), rounding=ROUND_HALF_UP
         )
         return gap, pct
+
+    @property
+    def is_full_pix(self) -> bool:
+        return (
+            self.payment_type == "PIX"
+            and (self.payment_installments or 1) == 1
+            and not self.payment_type_2
+            and not self.down_payment_value
+        )
 
     def get_payment_plans(self) -> list[dict]:
         """Opções de pagamento persistidas, uma por modalidade oferecida."""
@@ -747,7 +827,9 @@ class Quote(models.Model):
             build_payment_plan(
                 total=self.calculate_rounded_total(),
                 tier=PriceTier.RETAIL,
-                **common,
+                **({**common, "installments": 1, "payment_type_2": "",
+                    "split_amount": None, "down_payment": None}
+                   if self.cash_only else common),
             )
         ]
         if self.dual_pricing:

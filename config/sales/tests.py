@@ -37,6 +37,7 @@ class QuoteSubmissionRegressionTests(TestCase):
             "delivery_days_min": "",
             "delivery_days_max": "",
             "freight_value": "0.00",
+            "freight_commission_deduction": "",
             "freight_responsible": "CUSTOMER",
             "shipping_company": "",
             "discount_percent": "0",
@@ -170,6 +171,45 @@ class QuoteSubmissionRegressionTests(TestCase):
         self.assertEqual(quote.items.get().unit_value, Decimal("7900.00"))
         self.assertEqual(quote.freight_value, Decimal("1250.50"))
         self.assertEqual(quote.total_override, Decimal("9999.90"))
+
+    def test_seller_edits_internal_freight_in_regular_quote_form(self):
+        self.client.post(reverse("sales:quote_create"), self._payload(uuid4(), "11000.00"))
+        quote = Quote.objects.get()
+
+        page = self.client.get(reverse("sales:quote_edit", args=[quote.id]))
+        self.assertContains(page, 'name="freight_commission_deduction"')
+        self.assertContains(page, "Não altera o total cobrado do cliente")
+
+        payload = self._payload(uuid4(), "11000.00")
+        payload.update({
+            "freight_commission_deduction": "1.284,20",
+            "items-INITIAL_FORMS": "1",
+            "items-0-id": quote.items.get().id,
+        })
+        response = self.client.post(reverse("sales:quote_edit", args=[quote.id]), payload)
+
+        self.assertEqual(response.status_code, 302)
+        quote.refresh_from_db()
+        self.assertEqual(quote.freight_commission_deduction, Decimal("1284.20"))
+        self.assertEqual(quote.calculate_rounded_total(), Decimal("11000.00"))
+
+    def test_regular_form_rejects_internal_freight_above_customer_total(self):
+        self.client.post(reverse("sales:quote_create"), self._payload(uuid4(), "11000.00"))
+        quote = Quote.objects.get()
+        payload = self._payload(uuid4(), "11000.00")
+        payload.update({
+            "total_override": "11.000,00",
+            "freight_commission_deduction": "12.000,00",
+            "items-INITIAL_FORMS": "1",
+            "items-0-id": quote.items.get().id,
+        })
+
+        response = self.client.post(reverse("sales:quote_edit", args=[quote.id]), payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "O frete a abater não pode ser maior")
+        quote.refresh_from_db()
+        self.assertEqual(quote.freight_commission_deduction, Decimal("0.00"))
 
 
 class StandaloneOrderTests(TestCase):
@@ -655,6 +695,15 @@ class TotalOverrideSimulationTests(TestCase):
         self.assertEqual(ctx["final_total"], Decimal("2300"))
         # Produtos = 2300 − 300 de frete; margem = 2000 − 88% de 2500.
         self.assertEqual(ctx["margin_balance"], Decimal("-200.00"))
+
+    def test_frete_manual_reduz_a_venda_interna_sem_mudar_o_cliente(self):
+        ctx = self._sim(
+            total_override=Decimal("11000.00"),
+            freight_commission_deduction=Decimal("1284.20"),
+        )
+
+        self.assertEqual(ctx["final_total"], Decimal("11000.00"))
+        self.assertEqual(ctx["net_sales_value"], Decimal("9715.80"))
 
     def test_comissao_incide_sobre_o_que_o_cliente_paga(self):
         cheio = self._sim()
@@ -1654,12 +1703,38 @@ class CashPriceTests(TestCase):
         self.assertIsNone(self.quote.calculate_rounded_total_cash())
         self.assertEqual(self.quote.calculate_total_for_tier(), Decimal("2500.00"))
 
+    def test_pix_integral_fecha_a_vista_com_o_preco_unico(self):
+        from pypdf import PdfReader
+        from sales.models import PaymentTerms
+
+        self.client.force_login(self.seller)
+        detail = reverse("sales:quote_detail", args=[self.quote.id])
+        self.assertContains(self.client.get(detail), "À vista no Pix")
+
+        pdf = self.client.get(reverse("sales:quote_pdf_client", args=[self.quote.id]))
+        self.assertIn(
+            "À vista no Pix",
+            "\n".join(page.extract_text() for page in PdfReader(BytesIO(pdf.content)).pages),
+        )
+
+        response = self.client.post(
+            reverse("sales:quote_convert", args=[self.quote.id]),
+            {"has_item_selection": "1", "selected_payment_terms": PaymentTerms.INSTALLMENT},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.quote.refresh_from_db()
+        self.assertEqual(self.quote.status, QuoteStatus.CONVERTED)
+        self.assertEqual(self.quote.selected_payment_terms, PaymentTerms.CASH)
+        self.assertEqual(self.quote.total_value_snapshot, Decimal("2500.00"))
+
     def test_zero_nao_e_preco_a_vista(self):
         self._set_cash(Decimal("0.00"))
         self.assertIsNone(self.quote.effective_cash_override)
         self.assertIsNone(self.quote.calculate_rounded_total_cash())
 
-    def test_preco_a_vista_nao_muda_o_total_ate_fechar(self):
+    def test_dois_precos_mantem_o_total_a_prazo_ate_fechar(self):
+        self.quote.total_override = Decimal("2500.00")
+        self.quote.save(update_fields=["total_override"])
         self._set_cash(Decimal("2375.00"))
         self.assertEqual(self.quote.calculate_total_for_tier(), Decimal("2500.00"))
         self.assertEqual(self.quote.total_value_snapshot, Decimal("2500.00"))
@@ -1682,6 +1757,8 @@ class CashPriceTests(TestCase):
         from sales.margin import simulate_quote
         from sales.models import PaymentTerms
 
+        self.quote.total_override = Decimal("2500.00")
+        self.quote.save(update_fields=["total_override"])
         self._set_cash(Decimal("2375.00"))
         a_prazo = simulate_quote(self.quote)
         self._close_as(PaymentTerms.CASH)
@@ -1727,6 +1804,7 @@ class CashPriceTests(TestCase):
 
     def test_pdf_do_cliente_traz_as_duas_condicoes_e_as_observacoes(self):
         self.quote.notes = "Prazo conta da confirmação do pagamento."
+        self.quote.total_override = Decimal("2500.00")
         self.quote.total_cash_override = Decimal("2375.00")
         self.quote.save()
 
@@ -1873,6 +1951,100 @@ class PrecoFinalFluxoTests(TestCase):
     def test_preco_final_menor_que_os_itens_manda_em_todas_as_telas(self):
         quote = self._create("900,00", "850,00")
         self._assert_preco_manda(quote, Decimal("900.00"), Decimal("850.00"))
+
+    def test_preco_unico_a_vista_substitui_a_soma_dos_itens(self):
+        from sales.margin import simulate_quote
+
+        quote = self._create("", "850,00")
+        self.assertEqual(quote.total_value_snapshot, Decimal("850"))
+        self.assertEqual(simulate_quote(quote)["final_total"], Decimal("850"))
+        text = self._pdf_text(quote)
+        self.assertIn("À vista", text)
+        self.assertIn("R$ 850,00", text)
+        self.assertNotIn("A prazo", text)
+        self.assertNotIn("R$ 1.000,00", text)
+
+    def test_frete_embutido_percentual_e_preco_unico_a_vista(self):
+        from core.models import ShippingCompany
+        from sales.margin import simulate_quote
+        from sales.models import PaymentTerms
+
+        carrier = ShippingCompany.objects.create(name="Transportadora teste")
+        payload = self._payload("", "36.000,00")
+        payload.update({
+            "freight_unit": "PERCENT",
+            "freight_percent": "20",
+            "freight_embedded": "on",
+            "freight_responsible": "CARRIER",
+            "delivery_days_min": "5",
+            "shipping_company": carrier.pk,
+            "items-0-unit_value": "10000.00",
+            "items-1-unit_value": "10000.00",
+            "items-1-quantity": "2",
+        })
+        response = self.client.post(reverse("sales:quote_create"), payload)
+        self.assertEqual(response.status_code, 302, getattr(response, "context", None))
+        quote = Quote.objects.get()
+        self.assertEqual(quote.freight_allocations(), [Decimal("2000"), Decimal("4000")])
+        self.assertEqual(quote.total_value_snapshot, Decimal("36000"))
+        self.assertEqual(simulate_quote(quote)["final_total"], Decimal("36000"))
+
+        detail = self.client.get(reverse("sales:quote_detail", args=[quote.pk]))
+        self.assertContains(detail, "Frete embutido por produto")
+        self.assertIsNone(detail.context["value_breakdown"]["cash_total"])
+        pdf = self._pdf_text(quote)
+        for amount in ("12.000,00", "24.000,00", "36.000,00"):
+            self.assertIn(amount, pdf)
+        self.assertNotIn("Frete:", pdf)
+        self.assertNotIn("A prazo", pdf)
+
+        response = self.client.post(
+            reverse("sales:quote_convert", args=[quote.pk]),
+            {"has_item_selection": "1", "selected_payment_terms": PaymentTerms.INSTALLMENT},
+        )
+        self.assertEqual(response.status_code, 302)
+        quote.refresh_from_db()
+        self.assertEqual(quote.selected_payment_terms, PaymentTerms.CASH)
+        self.assertEqual(quote.total_value_snapshot, Decimal("36000"))
+        self.assertEqual(quote.commission_value, Decimal("900"))
+        partner = User.objects.create_user(username="parceiro-frete", role="SELLER")
+        from sales.commission_split import apply_commission_split
+        apply_commission_split(quote, [str(partner.pk)])
+
+        payload["items-INITIAL_FORMS"] = "2"
+        payload["submission_token"] = str(uuid4())
+        for i, item in enumerate(quote.items.all()):
+            payload[f"items-{i}-id"] = item.pk
+        payload["freight_percent"] = "10"
+        edit_url = reverse("sales:quote_edit", args=[quote.pk])
+        response = self.client.post(edit_url, payload)
+        self.assertEqual(response.status_code, 302)
+        quote.refresh_from_db()
+        self.assertEqual(quote.total_value_snapshot, Decimal("36000"))
+        self.assertEqual(quote.commission_value, Decimal("990"))
+        self.assertCountEqual(
+            quote.commission_split.users.values_list("pk", flat=True), [self.seller.pk, partner.pk]
+        )
+
+        payload["submission_token"] = str(uuid4())
+        payload["freight_percent"] = "150"
+        invalid = self.client.post(edit_url, payload)
+        self.assertContains(invalid, "O frete embutido não pode superar o preço final informado.")
+        quote.refresh_from_db()
+        self.assertEqual(quote.freight_percent, Decimal("10"))
+
+    def test_frete_em_reais_distribui_centavos_e_percentual_usa_tabela_escolhida(self):
+        quote = self._create("")
+        quote.freight_responsible = "CARRIER"
+        quote.freight_embedded = True
+        quote.freight_value = Decimal("0.03")
+        self.assertEqual(quote.freight_allocations(), [Decimal("0.01"), Decimal("0.02")])
+
+        quote.dual_pricing = True
+        quote.freight_percent = Decimal("20")
+        quote.items.update(unit_value_wholesale=Decimal("300"))
+        self.assertEqual(quote.calculate_rounded_total_wholesale(), Decimal("720"))
+        self.assertEqual(quote.calculate_rounded_total(), Decimal("1200"))
 
     def test_so_a_prazo_digitado_nao_vira_a_soma_dos_itens(self):
         quote = self._create("1.100,00")
@@ -2172,3 +2344,20 @@ class SimuladorTravadoTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         self.quote.refresh_from_db()
         self.assertEqual(self.quote.discount_percent, Decimal("12.0"))
+
+    def test_nao_salva_frete_maior_que_o_total_do_cliente(self):
+        self._set_override(Decimal("1100.00"))
+
+        resp = self.client.post(self.url, {
+            "action": "save_conditions",
+            "discount_percent": "5.0",
+            "price_increase_percent": "0.0",
+            "sim_installments": "1",
+            "sim_payment_type": "PIX",
+            "freight_commission_deduction": "1.200,00",
+        })
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "O frete a abater não pode ser maior")
+        self.quote.refresh_from_db()
+        self.assertEqual(self.quote.freight_commission_deduction, Decimal("0.00"))

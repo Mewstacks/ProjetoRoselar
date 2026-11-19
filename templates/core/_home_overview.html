@@ -1,0 +1,80 @@
+{% load l10n %}
+<section class="idx-hero" aria-labelledby="home-title">
+  <div class="container">
+    <div class="overview-head">
+      <div>
+        <p class="overview-kicker">Visão pessoal</p>
+        <h1 id="home-title">Olá, {{ user.username|capfirst }}.</h1>
+        <p class="overview-intro">Resultados do ciclo de {{ cycle_start|date:"d/m/Y" }} a {{ cycle_end|date:"d/m/Y" }}. Vendas são apuradas pela data da venda.</p>
+      </div>
+      <div class="overview-controls">
+        <form method="get" class="cycle-form">
+          <label for="home-cycle">Ciclo de vendas</label>
+          <div class="cycle-form-row">
+            <select id="home-cycle" name="ciclo" class="form-select">
+              {% for cycle in cycle_choices %}
+              <option value="{{ cycle.value }}" {% if cycle.value == cycle_value %}selected{% endif %}>{{ cycle.label }} · {{ cycle.start|date:"d/m" }}–{{ cycle.end|date:"d/m" }}</option>
+              {% endfor %}
+            </select>
+            <button type="submit" class="btn-a dark">Aplicar</button>
+          </div>
+        </form>
+        <a href="{% url 'sales:quote_create' %}" class="btn-a primary"><i class="fa-solid fa-plus" aria-hidden="true"></i>Novo orçamento</a>
+      </div>
+    </div>
+
+    <div class="row g-3 overview-metrics" aria-label="Indicadores do ciclo selecionado">
+      <div class="col-6 col-xl-3"><div class="h-metric">
+        <div class="hm-label">Vendas no ciclo</div>
+        <div class="hm-value">R$ {{ my_total_sold_month|floatformat:'0g' }}</div>
+        <div class="hm-sub">{{ my_converted_count_month }} venda{{ my_converted_count_month|pluralize }} · anterior: R$ {{ prev_total|floatformat:'0g' }}</div>
+      </div></div>
+      <div class="col-6 col-xl-3"><div class="h-metric">
+        <div class="hm-label">Orçamentos criados</div>
+        <div class="hm-value">{{ my_quotes_count_month }}</div>
+        <div class="hm-sub">{{ my_cohort_converted_month }} convertido{{ my_cohort_converted_month|pluralize }} deste ciclo</div>
+      </div></div>
+      <div class="col-6 col-xl-3"><div class="h-metric">
+        <div class="hm-label">Conversão</div>
+        <div class="hm-value">{% if my_quotes_count_month %}{{ my_conversion_rate }}%{% else %}<span class="metric-unavailable">—</span>{% endif %}</div>
+        <div class="hm-sub">{% if my_quotes_count_month %}Dos orçamentos criados no ciclo{% else %}Sem orçamentos no ciclo{% endif %}</div>
+      </div></div>
+      <div class="col-6 col-xl-3"><div class="h-metric">
+        <div class="hm-label">Ticket médio</div>
+        <div class="hm-value">{% if my_converted_count_month %}R$ {{ my_avg_ticket|floatformat:'0g' }}{% else %}<span class="metric-unavailable">—</span>{% endif %}</div>
+        <div class="hm-sub">{% if my_converted_count_month %}Por venda concluída no ciclo{% else %}Sem vendas no ciclo{% endif %}</div>
+      </div></div>
+    </div>
+
+    <div class="row g-3 overview-details">
+      <div class="col-lg-4"><section class="overview-panel" aria-labelledby="goal-title">
+        <div class="overview-panel-head"><h2 id="goal-title">Minha meta</h2><a href="{% url 'core:goals_list' %}">Ver metas <span aria-hidden="true">→</span></a></div>
+        {% if goal_target > 0 %}
+          <p class="goal-figure">{{ goal_pct_raw }}% <span>atingido</span></p>
+          <div class="progress" role="progressbar" aria-label="Progresso da meta" aria-valuenow="{{ goal_pct|unlocalize }}" aria-valuemin="0" aria-valuemax="100"><div class="progress-bar bg-success" style="width:{{ goal_pct|unlocalize }}%"></div></div>
+          <p class="overview-note">R$ {{ my_total_sold_month|floatformat:'0g' }} de R$ {{ goal_target|floatformat:'0g' }} · {{ goal_source }}</p>
+        {% else %}
+          <p class="overview-empty-title">Meta não definida</p>
+          <p class="overview-note">Nenhuma meta pessoal cadastrada para este ciclo.</p>
+        {% endif %}
+      </section></div>
+      <div class="col-lg-4"><section class="overview-panel" aria-labelledby="status-title">
+        <div class="overview-panel-head"><h2 id="status-title">Status dos orçamentos</h2><a href="{% url 'sales:quotes_hub' %}">Ver todos <span aria-hidden="true">→</span></a></div>
+        <p class="overview-note">Orçamentos criados no ciclo selecionado</p>
+        {% if my_status_summary %}
+          <ul class="status-summary">{% for item in my_status_summary %}<li><span>{{ item.label }}</span><strong>{{ item.count }}</strong></li>{% endfor %}</ul>
+        {% else %}
+          <p class="overview-empty-title">Nenhum orçamento no ciclo</p>
+          <p class="overview-note">Selecione outro ciclo ou crie um orçamento.</p>
+        {% endif %}
+      </section></div>
+      <div class="col-lg-4"><section class="overview-panel" aria-labelledby="attention-title">
+        <div class="overview-panel-head"><h2 id="attention-title">Precisa de atenção</h2><a href="{% url 'core:dashboard' %}?ciclo={{ cycle_value }}">Abrir painel <span aria-hidden="true">→</span></a></div>
+        <p class="overview-note">Pendências abertas e eventos atrasados, independentemente do ciclo.</p>
+        {% if overdue_events %}<h3 class="attention-label danger">Atrasados</h3><ul class="attention-list">{% for ev in overdue_events %}<li><a href="{% url 'calendar_app:event_detail' ev.id %}"><span>{{ ev.title|truncatechars:30 }}</span><time datetime="{{ ev.event_date|date:'Y-m-d' }}">{{ ev.event_date|date:"d/m" }}</time></a></li>{% endfor %}</ul>{% endif %}
+        {% if pending_quotes %}<h3 class="attention-label">Orçamentos pendentes</h3><ul class="attention-list">{% for q in pending_quotes %}<li><a href="{% url 'sales:quote_detail' q.id %}"><span>{{ q.number }} · {{ q.customer.name|truncatechars:20 }}</span><span aria-hidden="true">→</span></a></li>{% endfor %}</ul>{% endif %}
+        {% if not overdue_events and not pending_quotes %}<p class="overview-empty-title">Tudo em dia</p><p class="overview-note">Nenhuma pendência aberta ou evento atrasado.</p>{% endif %}
+      </section></div>
+    </div>
+  </div>
+</section>

@@ -35,6 +35,8 @@ def refresh_snapshots(apps, schema_editor):
             "commission_rule",
             "real_discount_snapshot",
             "real_discount_pct_snapshot",
+            "freight_embedded",
+            "freight_percent",
         )
         .prefetch_related("items")
         .iterator(chunk_size=200)

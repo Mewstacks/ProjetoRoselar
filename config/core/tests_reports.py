@@ -72,6 +72,24 @@ class ReportSalesTests(ReportTestBase):
         self.assertEqual(resp.context["count"], 2)
         self.assertEqual(resp.context["avg_value"], Decimal("750.00"))
 
+    def test_freight_deduction_is_removed_from_internal_sales(self):
+        quote = self._sale(
+            "V-FRETE-LIQUIDO",
+            items=[("Produtos", 1, "9715.80")],
+            freight_responsible="CARRIER",
+            freight_value=Decimal("1284.20"),
+            freight_commission_deduction=Decimal("1284.20"),
+        )
+
+        resp = self.client.get(reverse("core:report_sales"), self._period_qs())
+
+        self.assertEqual(quote.total_value_snapshot, Decimal("11000.00"))
+        self.assertEqual(quote.net_sales_value, Decimal("9715.80"))
+        self.assertEqual(resp.context["total"], Decimal("9715.80"))
+        self.assertEqual(resp.context["avg_value"], Decimal("9715.80"))
+        self.assertContains(resp, "Frete abatido")
+        self.assertContains(resp, "9.715,80")
+
     def test_canceled_quote_is_not_a_sale(self):
         self._sale("V-1", items=[("Mesa", 1, "1000.00")])
         canceled = self._sale("V-2", items=[("Mesa", 1, "9999.00")])
@@ -550,6 +568,18 @@ class CsvExportTests(ReportTestBase):
 
         self.assertTrue(body.startswith("Número;Data;Cliente;Vendedor;Desconto %;Total R$"))
 
+    def test_export_uses_net_sale_after_freight(self):
+        self._sale(
+            "V-FRETE-CSV", items=[("Mesa", 1, "11000.00")],
+            freight_commission_deduction=Decimal("1284.20"),
+        )
+
+        resp = self.client.get(reverse("core:report_csv_export"), self._period_qs())
+        row = resp.content.decode("utf-8-sig").splitlines()[1].split(";")
+
+        self.assertEqual(row[0], "V-FRETE-CSV")
+        self.assertEqual(row[5], "9715.80")
+
 
 class NewCommissionAndReportTests(ReportTestBase):
     def setUp(self):
@@ -581,6 +611,18 @@ class NewCommissionAndReportTests(ReportTestBase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(list(response.context["quotes"]), [quote])
         self.assertEqual(response.context["total_freight_deduction"], Decimal("75.00"))
+
+    def test_commission_report_uses_net_sale_after_freight(self):
+        quote = self._sale(
+            "V-COMMISSAO-LIQUIDA", items=[("Mesa", 1, "11000.00")],
+            freight_commission_deduction=Decimal("1284.20"),
+        )
+        persist_quote_commission(quote)
+
+        response = self.client.get(reverse("core:report_commissions"), self._period_qs())
+
+        self.assertEqual(response.context["total_sold_period"], Decimal("9715.80"))
+        self.assertEqual(response.context["commissions"][0]["total_sold"], Decimal("9715.80"))
 
     def test_card_report_emits_one_row_for_each_card_leg(self):
         quote = self._sale(

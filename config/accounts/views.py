@@ -11,6 +11,8 @@ from django.conf import settings
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 
+from accounts.session import remember_session
+
 from core.ratelimit import (
     client_ip,
     clear_attempts,
@@ -53,6 +55,7 @@ def login(request):
 
         if user is not None:
             clear_attempts("login", rl_ident)
+            auth_login(request, user)
             remember = request.POST.get('remember')
             if not remember:
                 # 12h em vez de "ate fechar o navegador": no celular o Chrome
@@ -61,9 +64,7 @@ def login(request):
                 # que ele digitou some. 12h cobre o dia de trabalho.
                 request.session.set_expiry(60 * 60 * 12)
             else:
-                # Session lasts 30 days
-                request.session.set_expiry(60 * 60 * 24 * 30)
-            auth_login(request, user)
+                remember_session(request.session)
             messages.success(request, f'Bem-vindo de volta, {user.username}!')
             next_url = request.GET.get('next', '')
             if not url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):

@@ -66,6 +66,7 @@ class QuoteForm(forms.ModelForm):
     # vazio = None (usa o total calculado).
     total_override = forms.CharField(
         required=False,
+        help_text="Use para o preço a prazo ou para um preço único sem condição alternativa.",
         widget=forms.TextInput(attrs={
             "class": "form-control", "inputmode": "numeric", "placeholder": "0,00",
             "data-financial": "money",
@@ -76,6 +77,16 @@ class QuoteForm(forms.ModelForm):
     # O frete é digitado em reais como qualquer outro valor da tela. Como
     # DecimalField do modelo ele recusava "1.250,50" e o envio voltava com erro
     # em um campo que o vendedor tinha preenchido certo.
+    freight_unit = forms.ChoiceField(
+        choices=(("BRL", "R$"), ("PERCENT", "%")), required=False,
+        widget=forms.Select(attrs={"class": "form-select"}), label="Unidade do frete",
+    )
+    freight_percent = forms.DecimalField(
+        required=False, min_value=Decimal("0"), max_value=Decimal("99999.99"),
+        max_digits=7, decimal_places=2, localize=True, label="Percentual de frete (%)",
+        widget=forms.TextInput(attrs={"class": "form-control", "inputmode": "decimal", "autocomplete": "off"}),
+    )
+
     freight_value = forms.CharField(
         required=False,
         widget=forms.TextInput(attrs={
@@ -85,13 +96,34 @@ class QuoteForm(forms.ModelForm):
         label="Valor do Frete (R$)",
     )
 
+    freight_commission_deduction = forms.CharField(
+        required=False,
+        widget=forms.TextInput(attrs={
+            "class": "form-control", "inputmode": "numeric", "placeholder": "0,00",
+            "data-financial": "money", "autocomplete": "off",
+            "aria-describedby": "freight-deduction-help",
+        }),
+        label="Frete a abater da venda e comissão (R$)",
+    )
+
     def clean_freight_value(self):
+        if self.data.get("freight_unit") == "PERCENT":
+            return Decimal("0.00")
         raw = self.cleaned_data.get('freight_value', '')
         if raw is None or str(raw).strip() == '':
             return Decimal("0.00")
         val = parse_brl_decimal(raw, 'valor do frete')
         if val < 0:
             raise forms.ValidationError('O valor do frete não pode ser negativo.')
+        return val
+
+    def clean_freight_commission_deduction(self):
+        raw = self.cleaned_data.get('freight_commission_deduction', '')
+        if raw is None or str(raw).strip() == '':
+            return Decimal("0.00")
+        val = parse_brl_decimal(raw, 'frete a abater')
+        if val < 0:
+            raise forms.ValidationError('O frete a abater não pode ser negativo.')
         return val
 
     def clean_total_override(self):
@@ -108,9 +140,10 @@ class QuoteForm(forms.ModelForm):
         return val
 
     # Preço final à vista. Mesmo parser e mesma leitura de zero do campo acima;
-    # vazio = o orçamento não oferece condição à vista.
+    # vazio = não há um preço alternativo à vista.
     total_cash_override = forms.CharField(
         required=False,
+        help_text="Use este campo para o valor final à vista. Deixe o outro preço vazio se esta for a única condição.",
         widget=forms.TextInput(attrs={
             "class": "form-control", "inputmode": "numeric", "placeholder": "0,00",
             "data-financial": "money",
@@ -138,6 +171,9 @@ class QuoteForm(forms.ModelForm):
             "delivery_days_min",
             "delivery_days_max",
             "freight_value",
+            "freight_percent",
+            "freight_embedded",
+            "freight_commission_deduction",
             "freight_responsible",
             "shipping_company",
             "discount_percent",
@@ -191,6 +227,12 @@ class QuoteForm(forms.ModelForm):
         
         # Freight fields are conditionally required (validated in clean)
         self.fields['freight_value'].required = False
+        self.fields["freight_embedded"].widget.attrs.update({
+            "class": "form-check-input", "aria-describedby": "freight-embedded-help",
+        })
+        self.initial["freight_unit"] = (
+            "PERCENT" if self.instance.freight_percent is not None else "BRL"
+        )
         self.fields['delivery_days_min'].required = False
         self.fields['delivery_days_max'].required = False
         self.fields['shipping_company'].required = False
@@ -206,10 +248,16 @@ class QuoteForm(forms.ModelForm):
         responsible = cleaned.get('freight_responsible')
         from decimal import Decimal
 
+        percent_mode = cleaned.get("freight_unit") == "PERCENT" and responsible != "CUSTOMER"
+        if not percent_mode:
+            cleaned["freight_percent"] = None
+        if responsible != "CARRIER":
+            cleaned["freight_embedded"] = False
+
         if responsible in ('STORE', 'CARRIER'):
-            fv = cleaned.get('freight_value')
-            if fv is None or fv <= Decimal('0'):
-                self.add_error('freight_value', 'Informe o valor do frete.')
+            field = "freight_percent" if percent_mode else "freight_value"
+            if not cleaned.get(field) and field not in self.errors:
+                self.add_error(field, "Informe o valor do frete.")
             if not cleaned.get('delivery_days_min'):
                 self.add_error('delivery_days_min', 'Informe o prazo mínimo de entrega.')
             if responsible == 'CARRIER' and not cleaned.get('shipping_company'):
@@ -229,8 +277,6 @@ class QuoteForm(forms.ModelForm):
         cash = cleaned.get('total_cash_override')
         if cash is not None:
             installment = cleaned.get('total_override')
-            if installment is None and self.instance.pk:
-                installment = self.instance.calculate_rounded_total()
             if installment is not None and cash > installment:
                 self.add_error(
                     'total_cash_override',
@@ -245,6 +291,65 @@ class QuoteForm(forms.ModelForm):
             cleaned['sale_date'] = self.instance.sale_date
 
         return cleaned
+
+    def validate_freight_items(self, formset):
+        quote = self.instance
+        items = [
+            form.instance for form in formset.forms
+            if form.cleaned_data and not form.cleaned_data.get("DELETE")
+        ]
+
+        # A mesma trava do simulador também vale no formulário normal. Sem
+        # ela, um abatimento maior que a venda poderia zerar silenciosamente
+        # os relatórios. Usa os itens ainda não salvos do formset para que a
+        # validação funcione tanto na criação quanto na edição.
+        tier = quote.selected_price_tier
+        wholesale = quote.dual_pricing and tier == PriceTier.WHOLESALE
+        subtotal = sum(
+            item.line_total_wholesale if wholesale else item.line_total
+            for item in items
+        )
+        billable_freight = Decimal("0.00")
+        if quote.freight_responsible != "STORE":
+            billable_freight = sum(
+                quote.freight_allocations(tier, items), Decimal("0.00")
+            )
+        if wholesale:
+            base = subtotal * (
+                Decimal("1") + (quote.price_increase_percent or Decimal("0")) / Decimal("100")
+            ) + billable_freight
+            totals = [quote.apply_client_rounding(base, use_override=False)]
+        else:
+            base = subtotal * (
+                Decimal("1")
+                + (quote.price_increase_percent or Decimal("0")) / Decimal("100")
+                - (quote.discount_percent or Decimal("0")) / Decimal("100")
+            ) + billable_freight
+            totals = [quote.apply_client_rounding(base)]
+            if quote.effective_cash_override is not None:
+                totals.append(quote.effective_cash_override)
+
+        deduction = quote.freight_commission_deduction or Decimal("0.00")
+        positive_totals = [total for total in totals if total is not None and total > 0]
+        if positive_totals and deduction > min(positive_totals):
+            self.add_error(
+                "freight_commission_deduction",
+                "O frete a abater não pode ser maior que o total cobrado do cliente.",
+            )
+            return False
+
+        if not quote.embeds_freight:
+            return True
+        field = "freight_percent" if quote.freight_percent is not None else "freight_value"
+        if not any(item.line_total > 0 for item in items):
+            self.add_error(field, "Informe pelo menos um produto com valor positivo para ratear o frete.")
+            return False
+        freight = sum(quote.freight_allocations(PriceTier.RETAIL, items))
+        prices = (quote.effective_total_override, quote.effective_cash_override)
+        if any(price is not None and freight > price for price in prices):
+            self.add_error(field, "O frete embutido não pode superar o preço final informado.")
+            return False
+        return True
 
 
 class QuoteItemForm(forms.ModelForm):

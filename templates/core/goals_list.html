@@ -1,4 +1,5 @@
 ﻿{% load static %}
+{% load l10n %}
 <!DOCTYPE html>
 <html lang="pt-BR" dir="ltr">
 <head>
@@ -14,6 +15,21 @@
   <link href="https://cdn.jsdelivr.net/npm/flowbite@2.5.2/dist/flowbite.min.css" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <style>:root{--brand:#111418;}body{font-variant-numeric:tabular-nums;font-family:'Manrope',sans-serif;}input::placeholder,textarea::placeholder{color:#565C66;opacity:1;}.goal-bar{height:20px;background:#e9ecef;border-radius:4px;overflow:hidden;}.goal-bar .fill{height:100%;background:#198754;}#newGoalModal.show .modal-dialog{transform:none!important;transition:none;}#newGoalModal .modal-content{display:flex;flex-direction:column;max-height:calc(100vh - 1rem);}#newGoalModal .modal-header,#newGoalModal .modal-footer{flex:0 0 auto;}#newGoalModal .modal-body{flex:1 1 0!important;height:auto!important;min-height:0;overflow-y:auto;}@media (pointer: coarse){ .btn, .btn-sm { min-height: 44px; display: inline-flex; align-items: center; } }@media (max-width:575.98px){#newGoalModal .modal-body{height:calc(100vh - 164px)!important;}#newGoalModal .modal-footer{flex-wrap:nowrap;}#newGoalModal .modal-footer .btn{flex:1 1 50%;min-width:0;justify-content:center;white-space:nowrap;}}</style>
+  <style>
+    .award-cap { display: inline-flex; align-items: center; padding: .35rem .65rem; border-radius: 2rem; background: #e8f5e9; color: #0f5132; font-size: .72rem; font-weight: 700; }
+    #newGoalModal .modal-title { color: #fff; }
+    .ifood-awards-mobile { display: none; }
+    @media (max-width: 767px) {
+      .ifood-awards-desktop { display: none; }
+      .ifood-awards-mobile { display: grid; gap: .75rem; }
+      .ifood-award { border: 1px solid #dee2e6; border-radius: 8px; padding: .85rem; }
+      .ifood-award-name { display: block; font-weight: 700; color: #111418; margin-bottom: .5rem; overflow-wrap: anywhere; }
+      .ifood-award-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; }
+      .ifood-award-grid span { display: block; font-size: .72rem; font-weight: 700; text-transform: uppercase; color: #565c66; }
+      .ifood-award-grid strong { display: block; font-size: .86rem; overflow-wrap: anywhere; }
+      .ifood-award-next { margin-top: .65rem; padding-top: .65rem; border-top: 1px solid #dee2e6; font-size: .8rem; }
+    }
+  </style>
 </head>
 <body>
   <a class="visually-hidden-focusable position-absolute top-0 start-0 m-2 bg-white text-dark p-2" href="#main-content">Pular para o conteúdo</a>
@@ -50,9 +66,10 @@
         <section class="bg-white border p-3 p-md-4 mb-4" style="border-radius:8px;" aria-labelledby="ifood-title">
           <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
             <div><h2 id="ifood-title" class="h5 fw-bold mb-1" style="color:var(--brand);"><i class="fa-solid fa-gift me-2 text-success" aria-hidden="true"></i>Premiação iFood Benefícios</h2><p class="small text-muted mb-0">Ciclo {{ ifood_cycle_start|date:"d/m" }} a {{ ifood_cycle_end|date:"d/m/Y" }} · maior faixa atingida no mês.</p></div>
-            <span class="badge text-bg-success">Até R$ 3.000</span>
+            <span class="award-cap">Até R$ 3.000</span>
           </div>
-          <div class="table-responsive"><table class="table table-sm align-middle mb-0"><caption class="visually-hidden">Faturamento e maior premiação iFood atingida por vendedor no ciclo atual.</caption><thead><tr><th scope="col">Vendedor</th><th scope="col" class="text-end">Faturamento</th><th scope="col" class="text-end">Prêmio</th><th scope="col">Próxima faixa</th></tr></thead><tbody>{% for award in ifood_awards %}<tr><td class="fw-bold">{{ award.seller.get_full_name|default:award.seller.username }}</td><td class="text-end">R$ {{ award.total|floatformat:2 }}</td><td class="text-end fw-bold {% if award.prize %}text-success{% else %}text-muted{% endif %}">{% if award.prize %}R$ {{ award.prize|floatformat:2 }}{% else %}Ainda não atingida{% endif %}</td><td>{% if award.next_target %}R$ {{ award.next_target|floatformat:0 }}{% else %}<span class="text-success fw-bold">Faixa máxima atingida</span>{% endif %}</td></tr>{% empty %}<tr><td colspan="4" class="text-center text-muted py-3">Nenhum vendedor elegível.</td></tr>{% endfor %}</tbody></table></div>
+          <div class="ifood-awards-desktop table-responsive"><table class="table table-sm align-middle mb-0"><caption class="visually-hidden">Faturamento e maior premiação iFood atingida por vendedor no ciclo atual.</caption><thead><tr><th scope="col">Vendedor</th><th scope="col" class="text-end">Faturamento</th><th scope="col" class="text-end">Prêmio</th><th scope="col">Próxima faixa</th></tr></thead><tbody>{% for award in ifood_awards %}<tr><td class="fw-bold">{{ award.seller.get_full_name|default:award.seller.username }}</td><td class="text-end">R$ {{ award.total|floatformat:'2g' }}</td><td class="text-end fw-bold {% if award.prize %}text-success{% else %}text-muted{% endif %}">{% if award.prize %}R$ {{ award.prize|floatformat:'2g' }}{% else %}Ainda não atingida{% endif %}</td><td>{% if award.next_target %}R$ {{ award.next_target|floatformat:'0g' }}{% else %}<span class="text-success fw-bold">Faixa máxima atingida</span>{% endif %}</td></tr>{% empty %}<tr><td colspan="4" class="text-center text-muted py-3">Nenhum vendedor elegível.</td></tr>{% endfor %}</tbody></table></div>
+          <div class="ifood-awards-mobile">{% for award in ifood_awards %}<div class="ifood-award"><strong class="ifood-award-name">{{ award.seller.get_full_name|default:award.seller.username }}</strong><div class="ifood-award-grid"><div><span>Faturamento</span><strong>R$ {{ award.total|floatformat:'2g' }}</strong></div><div><span>Prêmio</span><strong>{% if award.prize %}R$ {{ award.prize|floatformat:'2g' }}{% else %}Ainda não atingida{% endif %}</strong></div></div><div class="ifood-award-next">Próxima faixa: {% if award.next_target %}<strong>R$ {{ award.next_target|floatformat:'0g' }}</strong>{% else %}<strong>Faixa máxima atingida</strong>{% endif %}</div></div>{% empty %}<p class="text-muted mb-0">Nenhum vendedor elegível.</p>{% endfor %}</div>
         </section>
 
         <div class="row g-3">
@@ -66,11 +83,12 @@
                 </div>
                 <span class="text-muted" style="font-size:.8rem;">{{ goal.get_period_display }} | {{ goal.period_start|date:"d/m" }} - {{ goal.period_end|date:"d/m" }}</span>
               </div>
-              <div class="d-flex justify-content-between mb-1">
-                <span class="fw-bold small">Valor: R$ {{ goal.target_value|floatformat:0 }}</span>
-                {% if goal.target_quantity %}<span class="small text-muted">Qtd: {{ goal.target_quantity }}</span>{% endif %}
+              <div class="d-flex justify-content-between gap-2 mb-1 flex-wrap">
+                <span class="fw-bold small">R$ {{ goal.achieved_value|floatformat:'0g' }} de R$ {{ goal.target_value|floatformat:'0g' }}</span>
+                <span class="small text-muted">{% if goal.progress_pct != None %}{{ goal.progress_pct }}% atingido{% else %}Meta sem valor{% endif %}</span>
               </div>
-              <div class="goal-bar"><div class="fill" style="width:0%;"></div></div>
+              <div class="goal-bar" role="progressbar" aria-label="Progresso da meta de {% if goal.seller %}{{ goal.seller.username }}{% else %}vendas da equipe{% endif %}" aria-valuenow="{{ goal.progress_bar_pct|unlocalize }}" aria-valuemin="0" aria-valuemax="100"><div class="fill" style="width:{{ goal.progress_bar_pct|unlocalize }}%;"></div></div>
+              {% if goal.target_quantity %}<p class="small text-muted mb-0 mt-2">{{ goal.achieved_count }} de {{ goal.target_quantity }} vendas</p>{% endif %}
             </div>
           </div>
           {% empty %}
@@ -81,13 +99,13 @@
     </section>
 
     {% if is_admin %}
-    <div class="modal fade" id="newGoalModal" tabindex="-1">
+    <div class="modal fade" id="newGoalModal" tabindex="-1" aria-labelledby="new-goal-title">
       <div class="modal-dialog modal-dialog-scrollable">
         <div class="modal-content">
           <form method="post" action="{% url 'core:goal_create' %}" autocomplete="off">
             {% csrf_token %}
             <div class="modal-header" style="background:var(--brand);color:#fff;">
-              <h5 class="modal-title"><i class="fa-solid fa-bullseye me-2" aria-hidden="true"></i>Nova Meta</h5>
+              <h2 id="new-goal-title" class="h5 modal-title"><i class="fa-solid fa-bullseye me-2" aria-hidden="true"></i>Nova Meta</h2>
               <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Fechar"></button>
             </div>
             <div class="modal-body">

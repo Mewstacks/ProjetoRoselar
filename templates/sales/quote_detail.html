@@ -399,7 +399,7 @@
           <div class="col-md-4">
             <div class="hi green">
               <div class="hi-l">Frete</div>
-              <div class="hi-v">R$ {{ quote.freight_value|floatformat:2 }}</div>
+              <div class="hi-v">R$ {{ value_breakdown.freight|floatformat:"2g" }}</div>
             </div>
           </div>
           <div class="col-md-4">
@@ -451,7 +451,7 @@
               </div>
             {% endif %}
             <div class="r-line" style="border-top:2px solid var(--border);margin-top:.3rem;padding-top:.6rem;">
-              <span class="r-l" style="font-weight:800;color:var(--brand);">Total ao cliente{% if value_breakdown.cash_total %}{% if value_breakdown.sold_cash %} — à vista{% else %} — a prazo{% endif %}{% endif %}</span>
+              <span class="r-l" style="font-weight:800;color:var(--brand);">Total ao cliente{% if value_breakdown.cash_total %}{% if value_breakdown.sold_cash %} — à vista{% else %} — a prazo{% endif %}{% elif value_breakdown.full_pix %} — À vista no Pix{% elif value_breakdown.cash_only %} — À vista{% endif %}</span>
               <span style="font-weight:800;font-size:1.05rem;color:var(--brand);">R$ {{ value_breakdown.rounded_total|floatformat:2 }}</span>
             </div>
             {% if value_breakdown.cash_total %}
@@ -527,7 +527,7 @@
                 {% else %}
                   <div style="font-size:.86rem;color:var(--muted);">Não definida</div>
                 {% endif %}
-                {% if quote.dual_pricing %}
+                {% if quote.dual_pricing or quote.down_payment_value %}
                   <div style="display:grid;gap:.5rem;margin-top:.7rem;">
                     {% for plan in value_breakdown.payment_plans %}
                       <div style="border:1px solid var(--border);border-radius:8px;padding:.6rem .7rem;background:#f8f9fa;">
@@ -629,6 +629,24 @@
             </table>
           </div>
         </div>
+
+        {% if item_freight_rows %}
+          <section class="s-card" aria-labelledby="item-freight-heading">
+            <h2 class="s-hdr m-0" id="item-freight-heading">Frete embutido por produto</h2>
+            <div class="s-body">
+              <dl class="mb-0">
+                {% for item, original, freight, presented in item_freight_rows %}
+                  <div class="border-bottom py-2" style="overflow-wrap:anywhere;">
+                    <dt>{{ item.product_name }}</dt>
+                    <dd class="mb-0" style="font-variant-numeric:tabular-nums;">
+                      Original R$&nbsp;{{ original|floatformat:"2g" }} · Frete R$&nbsp;{{ freight|floatformat:"2g" }} · Preço com frete R$&nbsp;{{ presented|floatformat:"2g" }}
+                    </dd>
+                  </div>
+                {% endfor %}
+              </dl>
+            </div>
+          </section>
+        {% endif %}
 
         <!-- ═══ FINANCE ACTION PANEL ═══ -->
         {% if total_order and is_finance or total_order and is_admin %}
@@ -854,6 +872,8 @@
                             </label>
                           </div>
                         </div>
+                      {% elif value_breakdown.cash_only or value_breakdown.full_pix %}
+                        <p class="mt-3 mb-0"><strong>Condição de pagamento</strong> · À vista{% if value_breakdown.full_pix %} no Pix{% endif %}</p>
                       {% else %}
                         <input type="hidden" name="selected_payment_terms" value="PRAZO">
                       {% endif %}

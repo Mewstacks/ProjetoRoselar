@@ -131,18 +131,42 @@ def _last_n_month_starts(day: date_type, n: int = 6) -> list[date_type]:
     return starts
 
 
-def _net_quote_value(quote) -> Decimal:
-    """Returns the quote's customer-facing total.
+def _dashboard_period(request):
+    """Um ciclo explícito e compartilhado entre início e dashboard."""
+    today = timezone.localdate()
+    choices = _cycle_choices(today)
+    allowed = {choice["value"]: choice for choice in choices}
+    selected = allowed.get(request.GET.get("ciclo"), choices[0])
+    return today, selected["start"], selected["end"], choices
 
-    total_value_snapshot already stores the clean value (subtotal - discount + freight)
-    with NO payment fee added — the fee is a store cost absorbed by the margin.
-    """
-    return quote.total_value_snapshot or Decimal("0")
+
+def _individual_goal(user, cycle_start, cycle_end, current_start):
+    """Meta cadastrada no ciclo; a meta legada do usuário vale só no ciclo atual."""
+    goal = (
+        SalesGoal.objects.filter(
+            goal_type=GoalType.INDIVIDUAL,
+            seller=user,
+            period_start__lte=cycle_start,
+            period_end__gte=cycle_end,
+        )
+        .order_by("-period_start", "-id")
+        .first()
+    )
+    if goal:
+        return goal.target_value, "Meta cadastrada"
+    if cycle_start == current_start and user.individual_target_value:
+        return user.individual_target_value, "Meta padrão do cadastro"
+    return Decimal("0"), ""
+
+
+def _net_quote_value(quote) -> Decimal:
+    """Venda líquida interna: total do cliente menos frete do vendedor."""
+    return quote.net_sales_value
 
 
 def _sum_net_quote_values(quotes) -> Decimal:
-    """Soma o faturamento de um queryset de vendas no banco, não em memória."""
-    return quotes.aggregate(total=Sum("total_value_snapshot"))["total"] or Decimal("0")
+    """Soma a venda líquida sem mudar o snapshot cobrado do cliente."""
+    return sum((_net_quote_value(quote) for quote in quotes), Decimal("0"))
 
 
 def _build_net_month_series_from_quotes(quotes, month_starts: list[date_type]) -> tuple:
@@ -170,8 +194,8 @@ def home(request):
     context = {}
     if request.user.is_authenticated:
         user = request.user
-        today = timezone.localdate()
-        month_start, month_end = _month_bounds(today)
+        today, month_start, month_end, cycle_choices = _dashboard_period(request)
+        current_start = _sales_month_start(today)
         is_admin = user.role == Role.ADMIN or user.is_superuser
         is_staff_or_admin = is_admin
 
@@ -181,7 +205,7 @@ def home(request):
         my_converted_month = my_converted.filter(sold_on__gte=month_start, sold_on__lte=month_end)
 
         my_total_sold_month = _sum_net_quote_values(
-            my_converted_month.only("total_value_snapshot")
+            my_converted_month.only("total_value_snapshot", "freight_commission_deduction")
         )
         my_quotes_count_month = my_quotes_month.count()
         my_converted_count_month = my_converted_month.count()
@@ -205,8 +229,7 @@ def home(request):
             )
         )
 
-        # Goal — source of truth is user.individual_target_value set in admin
-        goal_target = user.individual_target_value or Decimal("0")
+        goal_target, goal_source = _individual_goal(user, month_start, month_end, current_start)
         goal_pct = round(float(my_total_sold_month) / float(goal_target) * 100, 1) if goal_target > 0 else 0
 
         # Avg discount
@@ -256,7 +279,7 @@ def home(request):
             ).count()
 
         # Monthly chart (6 months) — net values
-        month_starts = _last_n_month_starts(today, n=6)
+        month_starts = _last_n_month_starts(month_end, n=6)
         series_start = month_starts[0]
         # Teto é o fim do ciclo, não hoje: cortando em `hoje` a barra do mês
         # corrente ficava menor que o card de faturamento ao lado, que já usa
@@ -265,7 +288,7 @@ def home(request):
             seller=user,
             sold_on__gte=series_start,
             sold_on__lte=month_end,
-        ).only("quote_date", "sale_date", "total_value_snapshot")
+        ).only("quote_date", "sale_date", "total_value_snapshot", "freight_commission_deduction")
         chart_labels, chart_values, _ = _build_net_month_series_from_quotes(personal_month_quotes, month_starts)
 
         # Personal status breakdown (for hero pie)
@@ -274,10 +297,15 @@ def home(request):
         )
         my_status_labels = [QuoteStatus(d["status"]).label for d in my_status_data]
         my_status_values = [d["count"] for d in my_status_data]
+        my_status_summary = [
+            {"label": label, "count": count}
+            for label, count in zip(my_status_labels, my_status_values)
+        ]
 
         # Team stats (admin)
         team_total_sold_month = Decimal("0")
         team_quotes_month = 0
+        team_converted_month = 0
         team_conversion_rate = 0
         seller_ranking = []
         collective_goal = None
@@ -297,7 +325,7 @@ def home(request):
                 Quote.objects.sold().filter(
                     sold_on__gte=month_start,
                     sold_on__lte=month_end,
-                ).only("seller_id", "total_value_snapshot")
+                ).only("seller_id", "total_value_snapshot", "freight_commission_deduction")
                 .select_related("seller")
             )
             team_converted_month = len(_team_conv_qs)
@@ -326,8 +354,8 @@ def home(request):
             _collective_goal_obj = (
                 SalesGoal.objects.filter(
                     goal_type=GoalType.COLLECTIVE,
-                    period_start__lte=today,
-                    period_end__gte=today,
+                    period_start__lte=month_start,
+                    period_end__gte=month_end,
                 )
                 .order_by("-period_start", "-id")
                 .first()
@@ -337,8 +365,8 @@ def home(request):
             else:
                 _collective_goal_sum = SalesGoal.objects.filter(
                     goal_type=GoalType.INDIVIDUAL,
-                    period_start__lte=today,
-                    period_end__gte=today,
+                    period_start__lte=month_start,
+                    period_end__gte=month_end,
                     seller__role=Role.SELLER,
                 ).aggregate(total=Sum("target_value"))["total"] or Decimal("0")
             collective_goal = _collective_goal_sum if _collective_goal_sum > 0 else None
@@ -351,7 +379,7 @@ def home(request):
             bi_team_all_quotes = Quote.objects.sold().filter(
                 sold_on__gte=series_start,
                 sold_on__lte=month_end,
-            ).only("quote_date", "sale_date", "total_value_snapshot")
+            ).only("quote_date", "sale_date", "total_value_snapshot", "freight_commission_deduction")
             bi_team_chart_labels, bi_team_chart_values, bi_team_chart_counts = _build_net_month_series_from_quotes(
                 bi_team_all_quotes, month_starts,
             )
@@ -401,16 +429,22 @@ def home(request):
 
         context = {
             "today": today,
+            "cycle_start": month_start,
+            "cycle_end": month_end,
+            "cycle_choices": cycle_choices,
+            "cycle_value": month_start.isoformat(),
             "is_admin": is_admin,
             "is_staff_or_admin": is_staff_or_admin,
             "my_total_sold_month": my_total_sold_month,
             "my_quotes_count_month": my_quotes_count_month,
             "my_converted_count_month": my_converted_count_month,
+            "my_cohort_converted_month": my_cohort_converted_month,
             "my_conversion_rate": my_conversion_rate,
             "my_avg_ticket": my_avg_ticket,
             "prev_total": prev_total,
             "avg_discount": round(avg_discount, 1),
             "goal_target": goal_target,
+            "goal_source": goal_source,
             "goal_pct": min(goal_pct, 100),
             "goal_pct_raw": goal_pct,
             "pending_quotes": pending_quotes,
@@ -422,8 +456,10 @@ def home(request):
             "chart_values_json": _json_html(chart_values),
             "my_status_labels_json": _json_html(my_status_labels),
             "my_status_values_json": _json_html(my_status_values),
+            "my_status_summary": my_status_summary,
             "team_total_sold_month": team_total_sold_month,
             "team_quotes_month": team_quotes_month,
+            "team_converted_month": team_converted_month,
             "team_conversion_rate": team_conversion_rate,
             "seller_ranking": seller_ranking,
             "collective_goal": collective_goal,
@@ -432,6 +468,7 @@ def home(request):
             "bi_team_chart_labels_json": _json_html(bi_team_chart_labels),
             "bi_team_chart_values_json": _json_html(bi_team_chart_values),
             "bi_team_chart_counts_json": _json_html(bi_team_chart_counts),
+            "bi_team_has_sales": any(bi_team_chart_counts),
             "bi_status_labels_json": _json_html(bi_status_labels),
             "bi_status_values_json": _json_html(bi_status_values),
             "bi_prod_labels_json": _json_html(bi_prod_labels),
@@ -441,6 +478,7 @@ def home(request):
             "bi_seller_counts_json": _json_html(bi_seller_counts),
             "bi_disc_labels_json": _json_html(bi_disc_labels),
             "bi_disc_values_json": _json_html(bi_disc_values),
+            "bi_discount_has_data": bool(bi_disc_values),
             "bi_top_products": bi_top_products,
         }
     return render(request, "core/index.html", context)
@@ -452,8 +490,8 @@ def home(request):
 @login_required
 def dashboard(request):
     user = request.user
-    today = timezone.localdate()
-    month_start, month_end = _month_bounds(today)
+    today, month_start, month_end, cycle_choices = _dashboard_period(request)
+    current_start = _sales_month_start(today)
     is_admin = user.role == Role.ADMIN or user.is_superuser
     is_staff_or_admin = is_admin
 
@@ -485,8 +523,7 @@ def dashboard(request):
     )
     prev_total = _sum_net_quote_values(prev_converted)
 
-    # ── My Goal — source of truth is user.individual_target_value set in admin ──
-    goal_target = user.individual_target_value or Decimal("0")
+    goal_target, goal_source = _individual_goal(user, month_start, month_end, current_start)
     goal_pct = round(float(my_total_sold_month) / float(goal_target) * 100, 1) if goal_target > 0 else 0
 
     # ── Team Stats (admin) ──
@@ -507,7 +544,7 @@ def dashboard(request):
             Quote.objects.sold().filter(
                 sold_on__gte=month_start,
                 sold_on__lte=month_end,
-            ).only("seller_id", "total_value_snapshot")
+            ).only("seller_id", "total_value_snapshot", "freight_commission_deduction")
             .select_related("seller")
         )
         team_converted_month = len(_team_conv_qs)
@@ -539,8 +576,8 @@ def dashboard(request):
         _collective_goal_obj = (
             SalesGoal.objects.filter(
                 goal_type=GoalType.COLLECTIVE,
-                period_start__lte=today,
-                period_end__gte=today,
+                period_start__lte=month_start,
+                period_end__gte=month_end,
             )
             .order_by("-period_start", "-id")
             .first()
@@ -550,8 +587,8 @@ def dashboard(request):
         else:
             _collective_goal_sum = SalesGoal.objects.filter(
                 goal_type=GoalType.INDIVIDUAL,
-                period_start__lte=today,
-                period_end__gte=today,
+                period_start__lte=month_start,
+                period_end__gte=month_end,
                 seller__role=Role.SELLER,
             ).aggregate(total=Sum("target_value"))["total"] or Decimal("0")
         collective_goal = _collective_goal_sum if _collective_goal_sum > 0 else None
@@ -561,14 +598,14 @@ def dashboard(request):
             )
 
     # ── Monthly evolution (last 6 months) — net values ──
-    month_starts = _last_n_month_starts(today, n=6)
+    month_starts = _last_n_month_starts(month_end, n=6)
     series_start = month_starts[0]
     # Mesmo teto do card de faturamento (month_end), não `hoje`.
     personal_month_quotes = Quote.objects.sold().filter(
         seller=user,
         sold_on__gte=series_start,
         sold_on__lte=month_end,
-    ).only("quote_date", "sale_date", "total_value_snapshot")
+    ).only("quote_date", "sale_date", "total_value_snapshot", "freight_commission_deduction")
     chart_labels, chart_values, _ = _build_net_month_series_from_quotes(personal_month_quotes, month_starts)
 
     # ── Pending quotes ──
@@ -619,18 +656,24 @@ def dashboard(request):
 
     context = {
         "today": today,
+        "cycle_start": month_start,
+        "cycle_end": month_end,
+        "cycle_choices": cycle_choices,
+        "cycle_value": month_start.isoformat(),
         "is_admin": is_admin,
         "is_staff_or_admin": is_staff_or_admin,
         # Personal
         "my_total_sold_month": my_total_sold_month,
         "my_quotes_count_month": my_quotes_count_month,
         "my_converted_count_month": my_converted_count_month,
+        "my_cohort_converted_month": my_cohort_converted_month,
         "my_conversion_rate": my_conversion_rate,
         "my_avg_ticket": my_avg_ticket,
         "prev_total": prev_total,
         "avg_discount": round(avg_discount, 1),
         # Goal
         "goal_target": goal_target,
+        "goal_source": goal_source,
         "goal_pct": min(goal_pct, 100),
         "goal_pct_raw": goal_pct,
         # Team
@@ -644,6 +687,7 @@ def dashboard(request):
         # Chart
         "chart_labels_json": _json_html(chart_labels),
         "chart_values_json": _json_html(chart_values),
+        "chart_has_sales": any(chart_values),
         # Lists
         "pending_quotes": pending_quotes,
         "upcoming_deliveries": upcoming_deliveries,
@@ -1169,16 +1213,20 @@ def report_sales(request):
     date_from, date_to = _report_period(request)
     seller_id = request.GET.get("seller", "")
 
-    qs = _sales_queryset(date_from, date_to, seller_id).select_related("customer", "seller")
+    quotes = list(
+        _sales_queryset(date_from, date_to, seller_id)
+        .select_related("customer", "seller")
+        .order_by("-sold_on")
+    )
 
-    total = qs.aggregate(total=Sum("total_value_snapshot"))["total"] or Decimal("0")
-    count = qs.count()
+    total = sum((quote.net_sales_value for quote in quotes), Decimal("0"))
+    count = len(quotes)
     avg_value = round(total / count, 2) if count > 0 else Decimal("0")
 
     sellers = User.objects.filter(is_active=True).order_by("username")
 
     return render(request, "core/report_sales.html", {
-        "quotes": qs.order_by("-sold_on"),
+        "quotes": quotes,
         "total": total,
         "count": count,
         "avg_value": avg_value,
@@ -1249,7 +1297,7 @@ def report_commissions(request):
 
     for q in qs:
         sales_count += 1
-        value = q.total_value_snapshot or Decimal("0")
+        value = q.net_sales_value
         total_sold_period += value
 
         if q.commission_value is None:
@@ -1493,7 +1541,7 @@ def report_csv_export(request):
             # coluna é desconto, e o menos no início da célula seria neutralizado
             # por _csv_safe. O cabeçalho não muda para não quebrar planilhas.
             _csv_safe(f"{max(q.real_discount_pct_snapshot or Decimal('0.0'), Decimal('0.0'))}"),
-            _csv_safe(f"{q.total_value_snapshot}"),
+            _csv_safe(f"{q.net_sales_value}"),
         ])
 
     return response
@@ -1562,7 +1610,31 @@ def goals_list(request):
     if is_admin:
         goals = SalesGoal.objects.select_related("seller").all()
     else:
-        goals = SalesGoal.objects.filter(Q(seller=user) | Q(goal_type=GoalType.COLLECTIVE))
+        goals = SalesGoal.objects.filter(Q(seller=user) | Q(goal_type=GoalType.COLLECTIVE)).select_related("seller")
+
+    goals = list(goals)
+    progress_cache = {}
+    for goal in goals:
+        seller_id = goal.seller_id if goal.goal_type == GoalType.INDIVIDUAL else None
+        key = (goal.period_start, goal.period_end, seller_id)
+        if key not in progress_cache:
+            sales = Quote.objects.sold().filter(
+                sold_on__gte=goal.period_start,
+                sold_on__lte=goal.period_end,
+            )
+            if seller_id is not None:
+                sales = sales.filter(seller_id=seller_id)
+            progress_cache[key] = {
+                "total": _sum_net_quote_values(sales),
+                "count": sales.count(),
+            }
+        goal.achieved_value = progress_cache[key]["total"] or Decimal("0")
+        goal.achieved_count = progress_cache[key]["count"]
+        goal.progress_pct = (
+            round(goal.achieved_value / goal.target_value * 100, 1)
+            if goal.target_value > 0 else None
+        )
+        goal.progress_bar_pct = min(goal.progress_pct or 0, 100)
 
     sellers = User.objects.filter(is_active=True, role=Role.SELLER).order_by("username")
     cycle_start, cycle_end = _month_bounds(timezone.localdate())
@@ -1581,14 +1653,14 @@ def goals_list(request):
         (Decimal("100000"), Decimal("500")),
     )
     if award_sellers:
-        totals = {
-            row["seller_id"]: row["total"] or Decimal("0")
-            for row in (
-                Quote.objects.sold()
-                .filter(sold_on__gte=cycle_start, sold_on__lte=cycle_end, seller__in=award_sellers)
-                .values("seller_id").annotate(total=Sum("total_value_snapshot"))
-            )
-        }
+        totals = defaultdict(lambda: Decimal("0"))
+        award_sales = (
+            Quote.objects.sold()
+            .filter(sold_on__gte=cycle_start, sold_on__lte=cycle_end, seller__in=award_sellers)
+            .only("seller_id", "total_value_snapshot", "freight_commission_deduction")
+        )
+        for quote in award_sales:
+            totals[quote.seller_id] += quote.net_sales_value
     else:
         totals = {}
     ifood_awards = []

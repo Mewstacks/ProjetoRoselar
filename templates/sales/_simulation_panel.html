@@ -384,13 +384,16 @@
 
             {% if not standalone %}
             <div class="s-card fi fi-2">
-              <div class="s-hdr"><div class="s-icon muted"><i class="fa-solid fa-truck"></i></div>Frete por conta do vendedor</div>
+              <div class="s-hdr"><div class="s-icon muted"><i class="fa-solid fa-truck" aria-hidden="true"></i></div>Frete a abater</div>
               <div class="s-body">
-                <label for="freight-commission-input" class="f-label">Valor a descontar da comissão (R$)</label>
+                <label for="freight-commission-input" class="f-label">Valor do frete (R$)</label>
                 <input id="freight-commission-input" name="freight_commission_input" class="f-select" type="text" inputmode="numeric" data-financial="money"
-                       value="{{ freight_commission_deduction|floatformat:2 }}" oninput="scheduleSubmit()"
-                       aria-describedby="freight-commission-help">
-                <div id="freight-commission-help" class="small text-muted mt-1">Este valor não altera o frete cobrado do cliente; ele reduz somente a comissão líquida.</div>
+                       value="{{ freight_commission_deduction|floatformat:2 }}" oninput="scheduleSubmit()" autocomplete="off"
+                       style="background-image:none;"
+                       aria-describedby="freight-commission-help{% if freight_deduction_error %} freight-commission-error{% endif %}"
+                       {% if freight_deduction_error %}aria-invalid="true"{% endif %}>
+                <div id="freight-commission-help" class="small mt-1" style="color:#6c757d;">Não altera o total cobrado do cliente. O valor é retirado da venda usada em metas e relatórios e também da comissão líquida.</div>
+                {% if freight_deduction_error %}<div id="freight-commission-error" class="small text-danger fw-bold mt-1" role="alert">{{ freight_deduction_error }}</div>{% endif %}
               </div>
             </div>
             {% endif %}
@@ -419,6 +422,7 @@
                 <div id="dp-input-panel" style="display:{% if down_payment_value > 0 %}block{% else %}none{% endif %};margin-top:.9rem;">
                   <div class="d-flex align-items-center gap-2 mb-2">
                     <span style="font-weight:800;font-size:1.15rem;color:#6d28d9;flex-shrink:0;">R$</span>
+                    <label class="visually-hidden" for="dp-value-input">Valor da entrada</label>
                     <input type="text" id="dp-value-input"
                            class="form-control"
                            placeholder="0,00"
@@ -427,6 +431,7 @@
                            inputmode="decimal"
                            oninput="maskCurrency(this); onDpValueChange(this.value)">
                     <button type="button" onclick="clearDpValue()"
+                            aria-label="Limpar entrada"
                             style="padding:.3rem .65rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);font-size:.75rem;color:var(--muted);cursor:pointer;flex-shrink:0;"
                             title="Limpar entrada">
                       <i class="fa-solid fa-xmark"></i>
@@ -625,6 +630,18 @@
                   </div>
                 </div>
 
+                {% if freight_commission_deduction > 0 %}
+                <div class="hi muted mt-2" aria-label="Resumo interno da venda" aria-live="polite">
+                  <div class="d-flex justify-content-between align-items-center gap-3">
+                    <div>
+                      <div class="hi-l">Venda líquida para metas e relatórios</div>
+                      <div class="small" style="opacity:.82;">Total do cliente − frete abatido</div>
+                    </div>
+                    <div class="hi-v" style="font-size:1.2rem;white-space:nowrap;">R$ {{ net_sales_value|floatformat:2 }}</div>
+                  </div>
+                </div>
+                {% endif %}
+
                 {% if quote.dual_pricing and alternate_payment_plan %}
                   <div class="hi muted mt-2">
                     <div class="d-flex justify-content-between align-items-start gap-2">
@@ -719,7 +736,12 @@
                         </div>
                         <div class="small text-end" style="opacity:.9;">
                           <div>Bruta: R$ {{ seller_commission_gross_value|floatformat:2 }}</div>
-                          <div>Frete: − R$ {{ freight_commission_deduction|floatformat:2 }}</div>
+                          {% if quote.embeds_freight %}
+                            <div>Frete fora da base · R$&nbsp;{{ freight_value|floatformat:"2g" }}</div>
+                          {% endif %}
+                          {% if freight_commission_deduction %}
+                            <div>Desconto manual · − R$&nbsp;{{ freight_commission_deduction|floatformat:"2g" }}</div>
+                          {% endif %}
                         </div>
                       </div>
                     </div>
@@ -966,19 +988,19 @@ function normalizePercentInput(inputId, fallbackValue) {
 
 function onInstChange(val) {
   document.getElementById('h-installments').value = parseInt(val);
+  document.getElementById('manual-fee-input').value = '';
   updateFeeDisplay(parseInt(val));
-  toggleInstallmentTarget();
 }
 
 function onPaymentTypeChange() {
   var pt = document.getElementById('sel-ptype').value;
   document.getElementById('h-ptype').value = pt;
+  document.getElementById('manual-fee-input').value = '';
   var hasInst = (pt === 'CREDIT_CARD' || pt === 'BOLETO' || pt === 'CHEQUE');
   document.getElementById('inst-dropdown-row').style.display = hasInst ? '' : 'none';
   if (!hasInst) { document.getElementById('inst-select').value = 1; document.getElementById('h-installments').value = 1; }
   rebuildInstOptions();
   updateFeeDisplay(parseInt(document.getElementById('inst-select').value) || 1);
-  toggleInstallmentTarget();
   // Update method 1 slider visibility when in split mode
   _updateInc1Visibility();
   updateDpCalcVisibility();
@@ -988,6 +1010,7 @@ function onPaymentTypeChange() {
 function onPaymentType2Change() {
   var pt2 = document.getElementById('sel-ptype2').value;
   document.getElementById('h-ptype2').value = pt2;
+  document.getElementById('manual-fee2-input').value = '';
   var hasInst2 = (pt2 === 'CREDIT_CARD' || pt2 === 'BOLETO' || pt2 === 'CHEQUE');
   document.getElementById('inst2-dropdown-row').style.display = hasInst2 ? '' : 'none';
   if (!hasInst2) { document.getElementById('inst2-select').value = 1; document.getElementById('h-installments2').value = 1; }
@@ -1000,6 +1023,7 @@ function onPaymentType2Change() {
 
 function onInst2Change(val) {
   document.getElementById('h-installments2').value = val;
+  document.getElementById('manual-fee2-input').value = '';
   updateFee2Display(parseInt(val));
 }
 
@@ -1340,7 +1364,7 @@ function onDpValueChange(rawVal) {
   var lvEl = document.getElementById('dp-live-val');
   if (ls && num > 0) {
     ls.style.display = '';
-    if (lvEl) lvEl.textContent = 'R\u00a0' + num.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+    if (lvEl) lvEl.textContent = 'R$\u00a0' + num.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
     var lfEl = document.getElementById('dp-live-fin');
     if (lfEl) lfEl.textContent = '\u2014';
   } else if (ls) {
@@ -1453,7 +1477,10 @@ function resetSimulation() {
       var ls = document.getElementById('dp-live-stats');
       if (ls) ls.style.display = '';
       var lvEl = document.getElementById('dp-live-val');
-      if (lvEl) lvEl.textContent = 'R\u00a0' + dpNum.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+      if (lvEl) lvEl.textContent = 'R$\u00a0' + dpNum.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+      var finEl = document.getElementById('dp-live-fin');
+      var serverFin = document.getElementById('dp-server-fin');
+      if (finEl && serverFin) finEl.textContent = serverFin.textContent;
     }
   }
   var discountInput = document.getElementById('discount-input');

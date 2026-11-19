@@ -68,7 +68,7 @@
       display: inline-flex; align-items: center; gap: .35rem;
       padding: .55rem 1.2rem; font-weight: 700; font-size: .85rem;
       border: none; border-radius: 8px; cursor: pointer;
-      text-decoration: none; transition: all .2s;
+      text-decoration: none; transition: transform .2s ease-out, box-shadow .2s ease-out, background-color .2s ease-out, color .2s ease-out;
     }
     .btn-a:hover { transform: translateY(-1px); box-shadow: var(--shadow-h); }
     .btn-a:focus-visible { outline: 3px solid rgba(17,20,24,.35); outline-offset: 2px; }
@@ -96,11 +96,11 @@
     .q-row {
       background: var(--surface); border-radius: var(--radius);
       border: 1px solid rgba(0,0,0,.04); padding: 1rem 1.2rem;
-      margin-bottom: .6rem; transition: all .2s;
+      margin-bottom: .6rem; transition: background-color .2s ease-out;
       display: flex; justify-content: space-between; align-items: center;
       gap: 1rem; flex-wrap: wrap; box-shadow: var(--shadow);
     }
-    .q-row:hover { box-shadow: var(--shadow-h); transform: translateY(-1px); }
+    .q-row:hover { background: #fafbfc; }
     .q-row .q-main { flex: 1; min-width: 200px; }
     .q-row .q-num {
       font-weight: 800; color: var(--brand); font-size: .95rem;
@@ -131,8 +131,8 @@
       background-repeat: no-repeat; background-position: right .65rem center;
       background-size: 13px; padding-right: 2rem;
     }
-    .search-input:focus, .search-select:focus {
-      outline: none; border-color: var(--brand);
+    .search-input:focus-visible, .search-select:focus-visible {
+      outline: 3px solid #111418; outline-offset: 2px; border-color: var(--brand);
       box-shadow: 0 0 0 3px rgba(17,20,24,.1);
     }
 
@@ -167,10 +167,10 @@
     <nav class="navbar navbar-expand-lg fixed-top navbar-dark" data-navbar-on-scroll="data-navbar-on-scroll">
       <div class="container">
         <a class="navbar-brand" href="{% url 'core:index' %}">
-          <img src="{% static 'assets/img/Logo.png' %}?v=2" alt="Roselar — Início" style="height:40px;">
+          <img src="{% static 'assets/img/Logo.png' %}?v=2" alt="Roselar — Início" width="133" height="40">
         </a>
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent">
-          <i class="fa-solid fa-bars text-white fs-3"></i>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Abrir navegação">
+          <i class="fa-solid fa-bars text-white fs-3" aria-hidden="true"></i>
         </button>
         <div class="collapse navbar-collapse" id="navbarSupportedContent">
           <ul class="navbar-nav ms-auto">
@@ -255,12 +255,14 @@
             <form method="get">
               <div class="row g-2">
                 <div class="col-md-6">
-                  <input type="text" name="search" class="search-input"
-                         placeholder="Buscar por número, cliente, vendedor..."
+                  <label class="visually-hidden" for="quote-search">Buscar orçamento por número, cliente ou vendedor</label>
+                  <input id="quote-search" type="search" name="search" class="search-input"
+                         placeholder="Ex.: número, cliente ou vendedor…"
                          value="{{ search_query }}">
                 </div>
                 <div class="col-md-3">
-                  <select name="status" class="search-select">
+                  <label class="visually-hidden" for="quote-status">Filtrar por status</label>
+                  <select id="quote-status" name="status" class="search-select">
                     <option value="">Todos os Status</option>
                     <option value="DRAFT" {% if status_filter == "DRAFT" %}selected{% endif %}>Rascunho</option>
                     <option value="SENT" {% if status_filter == "SENT" %}selected{% endif %}>Enviado</option>
@@ -270,7 +272,7 @@
                   </select>
                 </div>
                 <div class="col-md-3">
-                  <button type="submit" class="btn-a blue" style="width:100%;justify-content:center;padding:.55rem;">
+                  <button type="submit" class="btn-a dark" style="width:100%;justify-content:center;padding:.55rem;">
                     <i class="fa-solid fa-search"></i>Buscar
                   </button>
                 </div>
@@ -298,7 +300,7 @@
           <form id="bulk-delete-form" method="post" action="{% url 'sales:quotes_bulk_delete' %}">
             {% csrf_token %}
             <div id="bulk-bar" style="display:none;background:#fff0f0;border:1.5px solid #f5c2c7;border-radius:10px;
-                 padding:.65rem 1.1rem;margin-bottom:.75rem;display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;">
+                 padding:.65rem 1.1rem;margin-bottom:.75rem;align-items:center;gap:.75rem;flex-wrap:wrap;">
               <span id="sel-count" style="font-size:.85rem;font-weight:700;color:#842029;"></span>
               <button type="button" id="btn-delete-selected" class="btn-a"
                       style="background:#D32F2F;color:#fff;padding:.4rem 1rem;font-size:.8rem;">
@@ -322,7 +324,7 @@
               <div class="q-row fi fi-3" id="row-{{ quote.id }}">
                 {% if is_admin %}
                   <input type="checkbox" name="quote_ids" value="{{ quote.id }}"
-                         class="quote-chk"
+                         class="quote-chk" aria-label="Selecionar orçamento {{ quote.number }}"
                          style="width:17px;height:17px;cursor:pointer;flex-shrink:0;accent-color:var(--red);">
                 {% endif %}
                 <div class="q-main">
@@ -341,7 +343,7 @@
                     {% endif %}
                   </div>
                 </div>
-                <div class="q-val">R$ {{ quote.total_value_snapshot|floatformat:2 }}</div>
+                <div class="q-val">R$ {{ quote.total_value_snapshot|floatformat:'2g' }}</div>
                 <div class="q-actions">
                   <a href="{% url 'sales:quote_detail' quote.id %}" class="btn-a dark" style="padding:.4rem .9rem;font-size:.78rem;">
                     <i class="fa-solid fa-eye"></i>Ver
@@ -370,7 +372,7 @@
                   {% endif %}
                 </div>
               </div>
-              <div class="q-val">R$ {{ quote.total_value_snapshot|floatformat:2 }}</div>
+              <div class="q-val">R$ {{ quote.total_value_snapshot|floatformat:'2g' }}</div>
               <div class="q-actions">
                 <a href="{% url 'sales:quote_detail' quote.id %}" class="btn-a dark" style="padding:.4rem .9rem;font-size:.78rem;">
                   <i class="fa-solid fa-eye"></i>Ver
