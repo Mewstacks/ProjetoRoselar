@@ -531,10 +531,7 @@ class OrderForm(forms.ModelForm):
         return f"{(value or Decimal('0.00')):.2f}".replace(".", ",")
 
     def _freight_quote(self):
-        quote = self.instance.quote if self.instance and self.instance.quote_id else None
-        if quote is None or quote.freight_responsible == "CUSTOMER":
-            return None
-        return quote
+        return self.instance.quote if self.instance and self.instance.quote_id else None
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -543,8 +540,9 @@ class OrderForm(forms.ModelForm):
             del self.fields["freight_value"]
             del self.fields["freight_commission_deduction"]
         else:
-            if quote.freight_percent is not None:
-                # Frete em %: o valor sai do percentual, que se edita no orçamento.
+            if quote.freight_percent is not None or quote.freight_responsible == "CUSTOMER":
+                # Frete em %: o valor sai do percentual, que se edita no
+                # orçamento. Frete por conta do cliente não tem valor da loja.
                 del self.fields["freight_value"]
             else:
                 self.initial["freight_value"] = self._money_text(quote.freight_value)
@@ -592,7 +590,7 @@ class OrderForm(forms.ModelForm):
             import copy
             probe = copy.copy(quote)
             new_freight = cleaned.get("freight_value")
-            if new_freight is not None:
+            if new_freight is not None and "freight_value" in self.fields:
                 probe.freight_value = new_freight
             if deduction is None:
                 deduction = quote.freight_commission_deduction or Decimal("0.00")

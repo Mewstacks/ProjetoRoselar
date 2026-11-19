@@ -96,7 +96,7 @@ class OrderEditFreightTests(TestCase):
         self.quote.refresh_from_db()
         self.assertEqual(self.quote.freight_value, Decimal("100.00"))
 
-    def test_customer_paid_freight_has_no_freight_field(self):
+    def test_customer_paid_freight_only_offers_the_deduction(self):
         quote = self._quote("ORC-8001", "CUSTOMER", Decimal("0.00"))
         order = Order.objects.create(
             number="ORC-8001", quote=quote, is_total_conference=True,
@@ -105,6 +105,33 @@ class OrderEditFreightTests(TestCase):
         self.client.login(username="admin", password="x")
         resp = self.client.get(reverse("sales:order_edit", args=[order.id]))
         self.assertNotContains(resp, 'name="freight_value"')
+        self.assertContains(resp, 'name="freight_commission_deduction"')
+
+    def test_customer_paid_freight_deduction_can_be_saved(self):
+        quote = self._quote("ORC-8002", "CUSTOMER", Decimal("0.00"))
+        order = Order.objects.create(
+            number="ORC-8002", quote=quote, is_total_conference=True,
+            status=OrderStatus.PENDING,
+        )
+        item = order.items.create(
+            product_name="Cadeira", quantity=1, purchase_unit_cost=Decimal("50.00"),
+        )
+        self.client.login(username="admin", password="x")
+        resp = self.client.post(reverse("sales:order_edit", args=[order.id]), {
+            "supplier": "", "status": OrderStatus.PENDING,
+            "created_at": "2026-07-05T10:00", "purchase_condition_text": "",
+            "transport_info": "", "delivery_deadline": "", "notes": "",
+            "freight_commission_deduction": "45,00",
+            "items-TOTAL_FORMS": "1", "items-INITIAL_FORMS": "1",
+            "items-MIN_NUM_FORMS": "0", "items-MAX_NUM_FORMS": "1000",
+            "items-0-id": str(item.id), "items-0-product_name": "Cadeira",
+            "items-0-description": "", "items-0-quantity": "1",
+            "items-0-purchase_unit_cost": "50,00",
+        })
+        self.assertEqual(resp.status_code, 302)
+        quote.refresh_from_db()
+        self.assertEqual(quote.freight_commission_deduction, Decimal("45.00"))
+        self.assertEqual(quote.freight_value, Decimal("0.00"))
 
     def test_blank_freight_fields_leave_the_quote_alone(self):
         resp = self._post()
