@@ -2780,6 +2780,8 @@ def order_edit(request: HttpRequest, order_id: int) -> HttpResponse:
             with transaction.atomic():
                 form.save()
                 formset.save()
+                if form.save_freight() and order.quote.status in SOLD_STATUSES:
+                    persist_quote_commission(order.quote)
 
                 # Data de emissão é uma só para a venda inteira. Um orçamento
                 # convertido gera vários pedidos (o total de conferência + um por

@@ -204,6 +204,32 @@
             </div>
           </div>
 
+          {% if form.freight_value or form.freight_commission_deduction %}
+          <!-- ═══ FRETE ═══ -->
+          <div class="s-card fi fi-1">
+            <div class="s-hdr">
+              <div class="s-icon blue"><i class="fa-solid fa-truck" aria-hidden="true"></i></div>
+              Frete
+            </div>
+            <div class="s-body">
+              <div class="row">
+                {% if form.freight_value %}
+                <div class="col-md-6 mb-3">
+                  <label for="{{ form.freight_value.id_for_label }}" class="form-label">Valor do frete (R$)</label>
+                  {{ form.freight_value }}
+                  {% if form.freight_value.errors %}<div class="text-danger small" role="alert">{{ form.freight_value.errors }}</div>{% endif %}
+                </div>
+                {% endif %}
+                <div class="col-md-6 mb-3">
+                  <label for="{{ form.freight_commission_deduction.id_for_label }}" class="form-label">Frete a abater (R$)</label>
+                  {{ form.freight_commission_deduction }}
+                  {% if form.freight_commission_deduction.errors %}<div class="text-danger small" role="alert">{{ form.freight_commission_deduction.errors }}</div>{% endif %}
+                </div>
+              </div>
+            </div>
+          </div>
+          {% endif %}
+
           <!-- ═══ ITENS ═══ -->
           <div class="s-card fi fi-2">
             <div class="s-hdr">

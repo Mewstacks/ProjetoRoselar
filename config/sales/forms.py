@@ -509,8 +509,48 @@ class OrderForm(forms.ModelForm):
             "created_at": "Data do Pedido",
         }
 
+    # O frete mora no orçamento. Estes dois campos editam o orçamento do pedido:
+    # em branco = não mexe.
+    freight_value = forms.CharField(
+        required=False, label="Valor do frete (R$)",
+        widget=forms.TextInput(attrs={
+            "class": "form-control", "inputmode": "numeric", "placeholder": "0,00",
+            "data-financial": "money", "autocomplete": "off",
+        }),
+    )
+    freight_commission_deduction = forms.CharField(
+        required=False, label="Frete a abater (R$)",
+        widget=forms.TextInput(attrs={
+            "class": "form-control", "inputmode": "numeric", "placeholder": "0,00",
+            "data-financial": "money", "autocomplete": "off",
+        }),
+    )
+
+    @staticmethod
+    def _money_text(value):
+        return f"{(value or Decimal('0.00')):.2f}".replace(".", ",")
+
+    def _freight_quote(self):
+        quote = self.instance.quote if self.instance and self.instance.quote_id else None
+        if quote is None or quote.freight_responsible == "CUSTOMER":
+            return None
+        return quote
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        quote = self._freight_quote()
+        if quote is None:
+            del self.fields["freight_value"]
+            del self.fields["freight_commission_deduction"]
+        else:
+            if quote.freight_percent is not None:
+                # Frete em %: o valor sai do percentual, que se edita no orçamento.
+                del self.fields["freight_value"]
+            else:
+                self.initial["freight_value"] = self._money_text(quote.freight_value)
+            self.initial["freight_commission_deduction"] = self._money_text(
+                quote.freight_commission_deduction
+            )
         self.fields["delivery_deadline"].input_formats = ["%Y-%m-%d"]
         self.fields["created_at"].input_formats = ["%Y-%m-%dT%H:%M"]
         for name in ("supplier", "purchase_condition_text", "transport_info", "delivery_deadline", "notes"):
@@ -520,6 +560,21 @@ class OrderForm(forms.ModelForm):
             self.fields["supplier"].disabled = True
             self.fields["supplier"].required = False
 
+    def _clean_optional_money(self, name, label):
+        raw = self.cleaned_data.get(name, "")
+        if raw is None or str(raw).strip() == "":
+            return None
+        value = parse_brl_decimal(raw, label)
+        if value < 0:
+            raise forms.ValidationError(f"O {label} não pode ser negativo.")
+        return value
+
+    def clean_freight_value(self):
+        return self._clean_optional_money("freight_value", "valor do frete")
+
+    def clean_freight_commission_deduction(self):
+        return self._clean_optional_money("freight_commission_deduction", "frete a abater")
+
     def clean(self):
         cleaned = super().clean()
         # Replica Order.clean(): normal exige fornecedor, total não pode ter.
@@ -528,7 +583,45 @@ class OrderForm(forms.ModelForm):
         else:
             if not cleaned.get("supplier"):
                 self.add_error("supplier", "Pedido por fornecedor precisa de fornecedor.")
+
+        quote = self._freight_quote()
+        deduction = cleaned.get("freight_commission_deduction")
+        if quote is not None and "freight_commission_deduction" not in self.errors:
+            # O abatimento nunca pode passar do que o cliente paga. O total é
+            # calculado com o frete novo, sem gravar nada antes de validar.
+            import copy
+            probe = copy.copy(quote)
+            new_freight = cleaned.get("freight_value")
+            if new_freight is not None:
+                probe.freight_value = new_freight
+            if deduction is None:
+                deduction = quote.freight_commission_deduction or Decimal("0.00")
+            total = probe.calculate_rounded_total()
+            if total and total > 0 and deduction > total:
+                self.add_error(
+                    "freight_commission_deduction",
+                    "O frete a abater não pode ser maior que o total cobrado do cliente.",
+                )
         return cleaned
+
+    def save_freight(self):
+        """Grava o frete no orçamento. Devolve True se algo mudou."""
+        quote = self._freight_quote()
+        if quote is None:
+            return False
+        changed = []
+        new_freight = self.cleaned_data.get("freight_value")
+        if new_freight is not None and new_freight != quote.freight_value:
+            quote.freight_value = new_freight
+            changed.append("freight_value")
+        new_deduction = self.cleaned_data.get("freight_commission_deduction")
+        if new_deduction is not None and new_deduction != quote.freight_commission_deduction:
+            quote.freight_commission_deduction = new_deduction
+            changed.append("freight_commission_deduction")
+        if not changed:
+            return False
+        quote.save()
+        return True
 
 
 class OrderItemForm(forms.ModelForm):
