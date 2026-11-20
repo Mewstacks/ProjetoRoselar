@@ -96,6 +96,36 @@ class DashboardNumbersTests(TestCase):
                 self.assertContains(response, "Painel da loja")
                 self.assertNotContains(response, "Meu painel")
 
+    def test_admin_and_finance_home_overview_shows_the_whole_store(self):
+        self.sale("HOME-LOJA", self.start + timedelta(days=1), "1000.00")
+        for role in ("ADMIN", "FINANCE"):
+            with self.subTest(role=role):
+                viewer = get_user_model().objects.create_user(
+                    username=f"home-{role.lower()}", password="x", role=role,
+                )
+                self.client.force_login(viewer)
+                response = self.client.get(reverse("core:index"))
+                self.assertEqual(response.status_code, 200)
+                self.assertTrue(response.context["store_view"])
+                self.assertEqual(response.context["kpi_total"], Decimal("1000.00"))
+                self.assertEqual(response.context["kpi_count"], 1)
+                self.assertEqual(response.context["kpi_quotes"], 1)
+                self.assertContains(response, "Visão da loja")
+                self.assertNotContains(response, "Visão pessoal")
+
+    def test_seller_home_overview_stays_personal(self):
+        self.sale("HOME-PESSOAL", self.start + timedelta(days=1), "1000.00")
+        other = get_user_model().objects.create_user(username="outro-home", password="x", role="SELLER")
+        Quote.objects.create(
+            number="HOME-OUTRO", customer=self.customer, seller=other,
+            status=QuoteStatus.CONVERTED, quote_date=self.start + timedelta(days=2),
+            sale_date=self.start + timedelta(days=2), freight_responsible="CUSTOMER",
+        ).items.create(product_name="Móvel", quantity=1, unit_value=Decimal("500.00"))
+        response = self.client.get(reverse("core:index"))
+        self.assertFalse(response.context["store_view"])
+        self.assertEqual(response.context["kpi_total"], Decimal("1000.00"))
+        self.assertContains(response, "Visão pessoal")
+
     def test_store_view_previous_cycle_and_ranking(self):
         prev_start, _ = _prev_month_bounds(self.start)
         self.sale("PAINEL-LOJA-ANT", prev_start + timedelta(days=1), "700.00")

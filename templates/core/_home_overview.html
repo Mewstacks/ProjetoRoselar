@@ -3,7 +3,7 @@
   <div class="container">
     <div class="overview-head">
       <div>
-        <p class="overview-kicker">Visão pessoal</p>
+        <p class="overview-kicker">{% if store_view %}Visão da loja{% else %}Visão pessoal{% endif %}</p>
         <h1 id="home-title">Olá, {{ user.username|capfirst }}.</h1>
         <p class="overview-intro">Resultados do ciclo de {{ cycle_start|date:"d/m/Y" }} a {{ cycle_end|date:"d/m/Y" }}. Vendas são apuradas pela data da venda.</p>
       </div>
@@ -26,29 +26,39 @@
     <div class="row g-3 overview-metrics" aria-label="Indicadores do ciclo selecionado">
       <div class="col-6 col-xl-3"><div class="h-metric">
         <div class="hm-label">Vendas no ciclo</div>
-        <div class="hm-value">R$ {{ my_total_sold_month|floatformat:'0g' }}</div>
-        <div class="hm-sub">{{ my_converted_count_month }} venda{{ my_converted_count_month|pluralize }} · anterior: R$ {{ prev_total|floatformat:'0g' }}</div>
+        <div class="hm-value">R$ {{ kpi_total|floatformat:'0g' }}</div>
+        <div class="hm-sub">{{ kpi_count }} venda{{ kpi_count|pluralize }} · anterior: R$ {{ kpi_prev|floatformat:'0g' }}</div>
       </div></div>
       <div class="col-6 col-xl-3"><div class="h-metric">
         <div class="hm-label">Orçamentos criados</div>
-        <div class="hm-value">{{ my_quotes_count_month }}</div>
-        <div class="hm-sub">{{ my_cohort_converted_month }} convertido{{ my_cohort_converted_month|pluralize }} deste ciclo</div>
+        <div class="hm-value">{{ kpi_quotes }}</div>
+        <div class="hm-sub">{{ kpi_cohort }} convertido{{ kpi_cohort|pluralize }} deste ciclo</div>
       </div></div>
       <div class="col-6 col-xl-3"><div class="h-metric">
         <div class="hm-label">Conversão</div>
-        <div class="hm-value">{% if my_quotes_count_month %}{{ my_conversion_rate }}%{% else %}<span class="metric-unavailable">—</span>{% endif %}</div>
-        <div class="hm-sub">{% if my_quotes_count_month %}Dos orçamentos criados no ciclo{% else %}Sem orçamentos no ciclo{% endif %}</div>
+        <div class="hm-value">{% if kpi_quotes %}{{ kpi_rate }}%{% else %}<span class="metric-unavailable">—</span>{% endif %}</div>
+        <div class="hm-sub">{% if kpi_quotes %}Dos orçamentos criados no ciclo{% else %}Sem orçamentos no ciclo{% endif %}</div>
       </div></div>
       <div class="col-6 col-xl-3"><div class="h-metric">
         <div class="hm-label">Ticket médio</div>
-        <div class="hm-value">{% if my_converted_count_month %}R$ {{ my_avg_ticket|floatformat:'0g' }}{% else %}<span class="metric-unavailable">—</span>{% endif %}</div>
-        <div class="hm-sub">{% if my_converted_count_month %}Por venda concluída no ciclo{% else %}Sem vendas no ciclo{% endif %}</div>
+        <div class="hm-value">{% if kpi_count %}R$ {{ kpi_avg_ticket|floatformat:'0g' }}{% else %}<span class="metric-unavailable">—</span>{% endif %}</div>
+        <div class="hm-sub">{% if kpi_count %}Por venda concluída no ciclo{% else %}Sem vendas no ciclo{% endif %}</div>
       </div></div>
     </div>
 
     <div class="row g-3 overview-details">
       <div class="col-lg-4"><section class="overview-panel" aria-labelledby="goal-title">
-        <div class="overview-panel-head"><h2 id="goal-title">Minha meta</h2><a href="{% url 'core:goals_list' %}">Ver metas <span aria-hidden="true">→</span></a></div>
+        <div class="overview-panel-head"><h2 id="goal-title">{% if store_view %}Meta coletiva{% else %}Minha meta{% endif %}</h2><a href="{% url 'core:goals_list' %}">Ver metas <span aria-hidden="true">→</span></a></div>
+        {% if store_view %}
+          {% if collective_goal %}
+            <p class="goal-figure">{{ collective_goal_pct }}% <span>atingido</span></p>
+            <div class="progress" role="progressbar" aria-label="Progresso da meta coletiva" aria-valuenow="{{ collective_goal_pct|unlocalize }}" aria-valuemin="0" aria-valuemax="100"><div class="progress-bar bg-success" style="width:{{ collective_goal_pct|unlocalize }}%"></div></div>
+            <p class="overview-note">R$ {{ team_total_sold_month|floatformat:'0g' }} de R$ {{ collective_goal|floatformat:'0g' }}</p>
+          {% else %}
+            <p class="overview-empty-title">Meta não definida</p>
+            <p class="overview-note">Nenhuma meta coletiva cadastrada para este ciclo.</p>
+          {% endif %}
+        {% else %}
         {% if goal_target > 0 %}
           <p class="goal-figure">{{ goal_pct_raw }}% <span>atingido</span></p>
           <div class="progress" role="progressbar" aria-label="Progresso da meta" aria-valuenow="{{ goal_pct|unlocalize }}" aria-valuemin="0" aria-valuemax="100"><div class="progress-bar bg-success" style="width:{{ goal_pct|unlocalize }}%"></div></div>
@@ -56,6 +66,7 @@
         {% else %}
           <p class="overview-empty-title">Meta não definida</p>
           <p class="overview-note">Nenhuma meta pessoal cadastrada para este ciclo.</p>
+        {% endif %}
         {% endif %}
       </section></div>
       <div class="col-lg-4"><section class="overview-panel" aria-labelledby="status-title">
