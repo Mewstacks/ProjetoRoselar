@@ -80,6 +80,49 @@ class DashboardNumbersTests(TestCase):
         self.assertContains(response, "Sem orçamentos no ciclo")
         self.assertContains(response, "Meta não definida")
 
+    def test_admin_and_finance_dashboard_top_shows_the_whole_store(self):
+        self.sale("PAINEL-LOJA", self.start + timedelta(days=1), "1000.00")
+        for role in ("ADMIN", "FINANCE"):
+            with self.subTest(role=role):
+                viewer = get_user_model().objects.create_user(
+                    username=f"viewer-{role.lower()}", password="x", role=role,
+                )
+                self.client.force_login(viewer)
+                response = self.client.get(reverse("core:dashboard"))
+                self.assertTrue(response.context["store_view"])
+                self.assertEqual(response.context["kpi_total"], Decimal("1000.00"))
+                self.assertEqual(response.context["kpi_count"], 1)
+                self.assertEqual(response.context["kpi_avg_ticket"], Decimal("1000.00"))
+                self.assertContains(response, "Painel da loja")
+                self.assertNotContains(response, "Meu painel")
+
+    def test_store_view_previous_cycle_and_ranking(self):
+        prev_start, _ = _prev_month_bounds(self.start)
+        self.sale("PAINEL-LOJA-ANT", prev_start + timedelta(days=1), "700.00")
+        admin = get_user_model().objects.create_user(
+            username="admin-loja", password="x", role="ADMIN",
+        )
+        self.client.force_login(admin)
+        response = self.client.get(reverse("core:dashboard"))
+        self.assertEqual(response.context["kpi_total"], Decimal("0"))
+        self.assertEqual(response.context["kpi_prev"], Decimal("700.00"))
+        response = self.client.get(reverse("core:dashboard"), {"ciclo": prev_start.isoformat()})
+        self.assertEqual(response.context["kpi_total"], Decimal("700.00"))
+        self.assertEqual(response.context["seller_ranking"][0]["seller__username"], self.seller.username)
+
+    def test_seller_dashboard_stays_personal(self):
+        self.sale("PAINEL-PESSOAL", self.start + timedelta(days=1), "1000.00")
+        other = get_user_model().objects.create_user(username="outro", password="x", role="SELLER")
+        Quote.objects.create(
+            number="OUTRO-1", customer=self.customer, seller=other,
+            status=QuoteStatus.CONVERTED, quote_date=self.start + timedelta(days=2),
+            sale_date=self.start + timedelta(days=2), freight_responsible="CUSTOMER",
+        ).items.create(product_name="Móvel", quantity=1, unit_value=Decimal("500.00"))
+        response = self.client.get(reverse("core:dashboard"))
+        self.assertFalse(response.context["store_view"])
+        self.assertEqual(response.context["kpi_total"], Decimal("1000.00"))
+        self.assertContains(response, "Meu painel")
+
     def test_goals_page_calculates_progress_from_sales(self):
         goal = SalesGoal.objects.create(
             goal_type=GoalType.INDIVIDUAL, period=GoalPeriod.MONTHLY,

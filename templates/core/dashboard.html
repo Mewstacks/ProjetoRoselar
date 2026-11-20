@@ -113,7 +113,7 @@
 
         <div class="bg-white p-4 mb-4 dashboard-header">
           <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-            <div><h1 class="h4 fw-bold mb-1" style="color: var(--brand);">Meu painel</h1><p class="dashboard-period mb-0">Ciclo de {{ cycle_start|date:"d/m/Y" }} a {{ cycle_end|date:"d/m/Y" }} · vendas pela data da venda</p></div>
+            <div><h1 class="h4 fw-bold mb-1" style="color: var(--brand);">{% if store_view %}Painel da loja{% else %}Meu painel{% endif %}</h1><p class="dashboard-period mb-0">Ciclo de {{ cycle_start|date:"d/m/Y" }} a {{ cycle_end|date:"d/m/Y" }} · vendas pela data da venda</p></div>
             <div class="d-flex gap-2">
               <a href="{% url 'sales:quote_create' %}" class="btn btn-success btn-sm"><i class="fa-solid fa-plus me-1"></i>Novo Orçamento</a>
               <a href="{% url 'calendar_app:calendar' %}" class="btn btn-outline-dark btn-sm"><i class="fa-solid fa-calendar me-1"></i>Calendário</a>
@@ -126,12 +126,21 @@
         </div>
 
         <div class="row g-3 mb-4">
-          <div class="col-6 col-md-3"><div class="metric-card"><div class="label">Vendas no ciclo</div><div class="value">R$ {{ my_total_sold_month|floatformat:'2g' }}</div><small class="dashboard-period">{{ my_converted_count_month }} venda{{ my_converted_count_month|pluralize }} · anterior: R$ {{ prev_total|floatformat:'2g' }}</small></div></div>
-          <div class="col-6 col-md-3"><div class="metric-card"><div class="label">Orçamentos criados</div><div class="value">{{ my_quotes_count_month }}</div><small class="dashboard-period">{{ my_cohort_converted_month }} convertido{{ my_cohort_converted_month|pluralize }} deste ciclo</small></div></div>
-          <div class="col-6 col-md-3"><div class="metric-card"><div class="label">Taxa de conversão</div><div class="value">{% if my_quotes_count_month %}{{ my_conversion_rate }}%{% else %}—{% endif %}</div><small class="dashboard-period">{% if my_quotes_count_month %}Dos orçamentos criados no ciclo{% else %}Sem orçamentos no ciclo{% endif %}</small></div></div>
-          <div class="col-6 col-md-3"><div class="metric-card"><div class="label">Ticket médio</div><div class="value">{% if my_converted_count_month %}R$ {{ my_avg_ticket|floatformat:'2g' }}{% else %}—{% endif %}</div><small class="dashboard-period">{% if my_converted_count_month %}Por venda concluída{% else %}Sem vendas no ciclo{% endif %}</small></div></div>
+          <div class="col-6 col-md-3"><div class="metric-card"><div class="label">Vendas no ciclo</div><div class="value">R$ {{ kpi_total|floatformat:'2g' }}</div><small class="dashboard-period">{{ kpi_count }} venda{{ kpi_count|pluralize }} · anterior: R$ {{ kpi_prev|floatformat:'2g' }}</small></div></div>
+          <div class="col-6 col-md-3"><div class="metric-card"><div class="label">Orçamentos criados</div><div class="value">{{ kpi_quotes }}</div><small class="dashboard-period">{{ kpi_cohort }} convertido{{ kpi_cohort|pluralize }} deste ciclo</small></div></div>
+          <div class="col-6 col-md-3"><div class="metric-card"><div class="label">Taxa de conversão</div><div class="value">{% if kpi_quotes %}{{ kpi_rate }}%{% else %}—{% endif %}</div><small class="dashboard-period">{% if kpi_quotes %}Dos orçamentos criados no ciclo{% else %}Sem orçamentos no ciclo{% endif %}</small></div></div>
+          <div class="col-6 col-md-3"><div class="metric-card"><div class="label">Ticket médio</div><div class="value">{% if kpi_count %}R$ {{ kpi_avg_ticket|floatformat:'2g' }}{% else %}—{% endif %}</div><small class="dashboard-period">{% if kpi_count %}Por venda concluída{% else %}Sem vendas no ciclo{% endif %}</small></div></div>
         </div>
 
+        {% if store_view %}
+        <div class="section-header"><i class="fa-solid fa-bullseye me-2"></i>Meta coletiva</div>
+        <div class="section-body">
+          {% if collective_goal %}
+          <div class="d-flex justify-content-between mb-1 gap-2 flex-wrap"><span class="fw-bold" style="color:var(--brand);">R$ {{ team_total_sold_month|floatformat:'2g' }} de R$ {{ collective_goal|floatformat:'2g' }}</span><span class="dashboard-period">{{ collective_goal_pct }}% atingido</span></div>
+          <div class="goal-bar" role="progressbar" aria-label="Progresso da meta coletiva" aria-valuenow="{{ collective_goal_pct|unlocalize }}" aria-valuemin="0" aria-valuemax="100"><div class="fill" style="width: {{ collective_goal_pct|unlocalize }}%;"></div></div>
+          {% else %}<p class="dashboard-empty mb-0">Nenhuma meta coletiva cadastrada para este ciclo. <a href="{% url 'core:goals_list' %}">Ver metas</a></p>{% endif %}
+        </div>
+        {% else %}
         <div class="section-header"><i class="fa-solid fa-bullseye me-2"></i>Minha Meta</div>
         <div class="section-body">
           {% if goal_target > 0 %}
@@ -140,11 +149,12 @@
           <p class="dashboard-period mt-2 mb-0">{{ goal_source }}</p>
           {% else %}<p class="dashboard-empty mb-0">Nenhuma meta pessoal cadastrada para este ciclo. <a href="{% url 'core:goals_list' %}">Ver metas</a></p>{% endif %}
         </div>
+        {% endif %}
 
         <div class="row">
           <div class="col-lg-7">
             <div class="section-header"><i class="fa-solid fa-chart-area me-2" aria-hidden="true"></i>Evolução de vendas · últimos 6 ciclos</div>
-            <div class="section-body" style="height: {% if chart_has_sales %}300{% else %}120{% endif %}px;">{% if chart_has_sales %}<canvas id="salesChart" role="img" aria-label="Evolução das vendas pessoais nos últimos seis ciclos"></canvas>{% else %}<p class="dashboard-empty text-center mt-3">Sem vendas nos últimos seis ciclos.</p>{% endif %}</div>
+            <div class="section-body" style="height: {% if chart_has_sales %}300{% else %}120{% endif %}px;">{% if chart_has_sales %}<canvas id="salesChart" role="img" aria-label="Evolução das vendas nos últimos seis ciclos"></canvas>{% else %}<p class="dashboard-empty text-center mt-3">Sem vendas nos últimos seis ciclos.</p>{% endif %}</div>
           </div>
           <div class="col-lg-5">
             <div class="section-header"><i class="fa-solid fa-truck me-2"></i>Próximas Entregas (7 dias)</div>
@@ -166,25 +176,10 @@
           {% else %}<p class="text-muted mb-0">Nenhum orçamento pendente</p>{% endif %}
         </div>
 
-        {% if is_admin %}
-        <div class="row">
-          <div class="col-lg-6">
-            <div class="section-header"><i class="fa-solid fa-users me-2"></i>Performance da Equipe</div>
-            <div class="section-body">
-              <div class="row g-2 mb-3">
-                <div class="col-12 col-sm-4"><div class="metric-card py-2 px-2 text-center"><div class="label">Total vendas</div><div class="value" style="font-size:1.1rem;">R$ {{ team_total_sold_month|floatformat:'0g' }}</div></div></div>
-                <div class="col-12 col-sm-4"><div class="metric-card py-2 px-2 text-center"><div class="label">Orçamentos</div><div class="value" style="font-size:1.1rem;">{{ team_quotes_month }}</div></div></div>
-                <div class="col-12 col-sm-4"><div class="metric-card py-2 px-2 text-center"><div class="label">Conversão</div><div class="value" style="font-size:1.1rem;">{% if team_quotes_month %}{{ team_conversion_rate }}%{% else %}—{% endif %}</div></div></div>
-              </div>
-              {% if collective_goal %}<div class="d-flex justify-content-between mb-1"><span class="fw-bold small" style="color:var(--brand);">Meta Coletiva: R$ {{ collective_goal|floatformat:'0g' }}</span><span style="color:var(--muted);font-size:.8rem;">{{ collective_goal_pct }}%</span></div><div class="goal-bar"><div class="fill" style="width:{{ collective_goal_pct|unlocalize }}%;"></div></div>{% endif %}
-            </div>
-          </div>
-          <div class="col-lg-6">
-            <div class="section-header"><i class="fa-solid fa-trophy me-2"></i>Ranking do ciclo</div>
-            <div class="section-body">
-              {% if seller_ranking %}<table class="mini-table"><thead><tr><th>#</th><th>Vendedor</th><th>Vendas</th><th>Total</th></tr></thead><tbody>{% for s in seller_ranking %}<tr><td>{{ forloop.counter }}</td><td>{{ s.seller__username }}</td><td>{{ s.count }}</td><td class="fw-bold">R$ {{ s.total|floatformat:'0g' }}</td></tr>{% endfor %}</tbody></table>{% else %}<p class="text-muted mb-0 small">Sem vendas neste ciclo</p>{% endif %}
-            </div>
-          </div>
+        {% if store_view %}
+        <div class="section-header"><i class="fa-solid fa-trophy me-2"></i>Ranking do ciclo</div>
+        <div class="section-body">
+          {% if seller_ranking %}<table class="mini-table"><thead><tr><th>#</th><th>Vendedor</th><th>Vendas</th><th>Total</th></tr></thead><tbody>{% for s in seller_ranking %}<tr><td>{{ forloop.counter }}</td><td>{{ s.seller__username }}</td><td>{{ s.count }}</td><td class="fw-bold">R$ {{ s.total|floatformat:'0g' }}</td></tr>{% endfor %}</tbody></table>{% else %}<p class="text-muted mb-0 small">Sem vendas neste ciclo</p>{% endif %}
         </div>
         {% endif %}
       </div>

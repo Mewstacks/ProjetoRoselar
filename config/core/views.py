@@ -494,6 +494,9 @@ def dashboard(request):
     current_start = _sales_month_start(today)
     is_admin = user.role == Role.ADMIN or user.is_superuser
     is_staff_or_admin = is_admin
+    # Admin e financeiro não vendem no próprio nome: o topo do painel mostra a
+    # loja toda. Vendedor continua vendo só o que é dele.
+    store_view = is_admin or user.role == Role.FINANCE
 
     # ── Personal Stats ──
     my_quotes = Quote.objects.filter(seller=user)
@@ -534,8 +537,15 @@ def dashboard(request):
     seller_ranking = []
     collective_goal = None
     collective_goal_pct = 0
+    team_prev_total = Decimal("0")
+    team_cohort_converted_month = 0
 
-    if is_admin:
+    if store_view:
+        team_prev_total = _sum_net_quote_values(
+            Quote.objects.sold().filter(
+                sold_on__gte=prev_month_start, sold_on__lte=prev_month_end,
+            )
+        )
         team_quotes_month = Quote.objects.filter(
             quote_date__gte=month_start,
             quote_date__lte=month_end,
@@ -602,10 +612,11 @@ def dashboard(request):
     series_start = month_starts[0]
     # Mesmo teto do card de faturamento (month_end), não `hoje`.
     personal_month_quotes = Quote.objects.sold().filter(
-        seller=user,
         sold_on__gte=series_start,
         sold_on__lte=month_end,
     ).only("quote_date", "sale_date", "total_value_snapshot", "freight_commission_deduction")
+    if not store_view:
+        personal_month_quotes = personal_month_quotes.filter(seller=user)
     chart_labels, chart_values, _ = _build_net_month_series_from_quotes(personal_month_quotes, month_starts)
 
     # ── Pending quotes ──
@@ -654,7 +665,33 @@ def dashboard(request):
         my_converted_month.aggregate(avg=Avg(_real_discount_pct()))["avg"] or 0
     )
 
+    if store_view:
+        kpi = {
+            "kpi_total": team_total_sold_month,
+            "kpi_count": team_converted_month,
+            "kpi_prev": team_prev_total,
+            "kpi_quotes": team_quotes_month,
+            "kpi_cohort": team_cohort_converted_month,
+            "kpi_rate": team_conversion_rate,
+            "kpi_avg_ticket": (
+                round(team_total_sold_month / team_converted_month, 2)
+                if team_converted_month > 0 else Decimal("0")
+            ),
+        }
+    else:
+        kpi = {
+            "kpi_total": my_total_sold_month,
+            "kpi_count": my_converted_count_month,
+            "kpi_prev": prev_total,
+            "kpi_quotes": my_quotes_count_month,
+            "kpi_cohort": my_cohort_converted_month,
+            "kpi_rate": my_conversion_rate,
+            "kpi_avg_ticket": my_avg_ticket,
+        }
+
     context = {
+        **kpi,
+        "store_view": store_view,
         "today": today,
         "cycle_start": month_start,
         "cycle_end": month_end,
