@@ -3285,6 +3285,7 @@ def quote_simulate_commission(request: HttpRequest, quote_id: int) -> HttpRespon
         subtotal=subtotal,
         freight_value=freight_value,
         freight_embedded=quote.embeds_freight,
+        informed_freight=quote.informed_freight,
         cash_only=pricing_tier == PriceTier.RETAIL and quote.cash_only,
         sim_payment_type=sim_payment_type,
         sim_has_architect=sim_has_architect,

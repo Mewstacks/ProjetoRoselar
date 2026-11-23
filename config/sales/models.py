@@ -758,18 +758,39 @@ class Quote(models.Model):
         return self.calculate_rounded_total()
 
     @property
+    def informed_freight(self) -> Decimal:
+        """Frete informado no orçamento, seja do cliente, da transportadora ou da loja."""
+        if self.freight_responsible == FreightResponsible.CUSTOMER:
+            return Decimal("0.00")
+        return self.freight_amount(
+            self.__dict__.get("selected_price_tier", PriceTier.RETAIL)
+        )
+
+    @property
+    def sales_freight_deduction(self) -> Decimal:
+        """Quanto de frete sai da venda líquida.
+
+        Vale o maior entre o frete informado e o abatimento manual: o mesmo
+        frete digitado nos dois lugares não é descontado duas vezes. Nunca
+        passa do total cobrado do cliente.
+        """
+        total = self.total_value_snapshot or Decimal("0.00")
+        manual = self.freight_commission_deduction or Decimal("0.00")
+        return min(total, max(manual, self.informed_freight))
+
+    @property
     def net_sales_value(self) -> Decimal:
-        """Valor interno da venda, sem o frete assumido pelo vendedor.
+        """Valor interno da venda, sem frete.
 
         ``total_value_snapshot`` continua sendo o total cobrado do cliente e,
         por isso, não pode ser alterado por um ajuste interno. Metas, rankings e
         relatórios de venda usam esta leitura líquida. O piso em zero evita que
         um lançamento incorreto de frete transforme uma venda em receita
-        negativa; a tela de simulação também impede salvar esse caso.
+        negativa; a tela de simulação também impede salvar esse caso. A
+        comissão não usa esta conta: ela segue o abatimento manual.
         """
         total = self.total_value_snapshot or Decimal("0.00")
-        freight = self.freight_commission_deduction or Decimal("0.00")
-        return max(Decimal("0.00"), total - freight)
+        return max(Decimal("0.00"), total - self.sales_freight_deduction)
 
     def calculate_list_value(self, tier: str | None = None) -> Decimal:
         """Valor de tabela: itens da modalidade + frete repassado ao cliente."""

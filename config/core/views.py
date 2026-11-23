@@ -208,7 +208,7 @@ def home(request):
         my_converted_month = my_converted.filter(sold_on__gte=month_start, sold_on__lte=month_end)
 
         my_total_sold_month = _sum_net_quote_values(
-            my_converted_month.only("total_value_snapshot", "freight_commission_deduction")
+            my_converted_month.only("total_value_snapshot", "freight_commission_deduction", "freight_responsible", "freight_value", "freight_percent")
         )
         my_quotes_count_month = my_quotes_month.count()
         my_converted_count_month = my_converted_month.count()
@@ -290,7 +290,7 @@ def home(request):
         personal_month_quotes = Quote.objects.sold().filter(
             sold_on__gte=series_start,
             sold_on__lte=month_end,
-        ).only("quote_date", "sale_date", "total_value_snapshot", "freight_commission_deduction")
+        ).only("quote_date", "sale_date", "total_value_snapshot", "freight_commission_deduction", "freight_responsible", "freight_value", "freight_percent")
         if not store_view:
             personal_month_quotes = personal_month_quotes.filter(seller=user)
         chart_labels, chart_values, _ = _build_net_month_series_from_quotes(personal_month_quotes, month_starts)
@@ -340,7 +340,7 @@ def home(request):
                 Quote.objects.sold().filter(
                     sold_on__gte=month_start,
                     sold_on__lte=month_end,
-                ).only("seller_id", "total_value_snapshot", "freight_commission_deduction")
+                ).only("seller_id", "total_value_snapshot", "freight_commission_deduction", "freight_responsible", "freight_value", "freight_percent")
                 .select_related("seller")
             )
             team_converted_month = len(_team_conv_qs)
@@ -394,7 +394,7 @@ def home(request):
             bi_team_all_quotes = Quote.objects.sold().filter(
                 sold_on__gte=series_start,
                 sold_on__lte=month_end,
-            ).only("quote_date", "sale_date", "total_value_snapshot", "freight_commission_deduction")
+            ).only("quote_date", "sale_date", "total_value_snapshot", "freight_commission_deduction", "freight_responsible", "freight_value", "freight_percent")
             bi_team_chart_labels, bi_team_chart_values, bi_team_chart_counts = _build_net_month_series_from_quotes(
                 bi_team_all_quotes, month_starts,
             )
@@ -595,7 +595,7 @@ def dashboard(request):
             Quote.objects.sold().filter(
                 sold_on__gte=month_start,
                 sold_on__lte=month_end,
-            ).only("seller_id", "total_value_snapshot", "freight_commission_deduction")
+            ).only("seller_id", "total_value_snapshot", "freight_commission_deduction", "freight_responsible", "freight_value", "freight_percent")
             .select_related("seller")
         )
         team_converted_month = len(_team_conv_qs)
@@ -655,7 +655,7 @@ def dashboard(request):
     personal_month_quotes = Quote.objects.sold().filter(
         sold_on__gte=series_start,
         sold_on__lte=month_end,
-    ).only("quote_date", "sale_date", "total_value_snapshot", "freight_commission_deduction")
+    ).only("quote_date", "sale_date", "total_value_snapshot", "freight_commission_deduction", "freight_responsible", "freight_value", "freight_percent")
     if not store_view:
         personal_month_quotes = personal_month_quotes.filter(seller=user)
     chart_labels, chart_values, _ = _build_net_month_series_from_quotes(personal_month_quotes, month_starts)
@@ -1460,17 +1460,24 @@ def report_freights(request):
         messages.error(request, "Acesso negado.")
         return redirect("core:index")
     date_from, date_to = _report_period(request)
-    quotes = (
+    # Frete que saiu da venda líquida: o informado no orçamento (cliente,
+    # transportadora ou loja) ou o abatimento manual.
+    has_freight = Q(freight_commission_deduction__gt=0) | (
+        ~Q(freight_responsible="CUSTOMER")
+        & (Q(freight_value__gt=0) | Q(freight_percent__gt=0))
+    )
+    quotes = list(
         Quote.objects.sold()
-        .filter(sold_on__gte=date_from, sold_on__lte=date_to, freight_commission_deduction__gt=0)
+        .filter(has_freight, sold_on__gte=date_from, sold_on__lte=date_to)
         .select_related("seller", "customer")
         .order_by("-sold_on", "-id")
     )
-    total = quotes.aggregate(total=Sum("freight_commission_deduction"))["total"] or Decimal("0")
+    quotes = [quote for quote in quotes if quote.sales_freight_deduction > 0]
+    total = sum((quote.sales_freight_deduction for quote in quotes), Decimal("0"))
     return render(request, "core/report_freights.html", {
         "quotes": quotes,
         "total_freight_deduction": total.quantize(Decimal("0.01")),
-        "count": quotes.count(),
+        "count": len(quotes),
         **_period_context(request, date_from, date_to),
     })
 
@@ -1735,7 +1742,7 @@ def goals_list(request):
         award_sales = (
             Quote.objects.sold()
             .filter(sold_on__gte=cycle_start, sold_on__lte=cycle_end, seller__in=award_sellers)
-            .only("seller_id", "total_value_snapshot", "freight_commission_deduction")
+            .only("seller_id", "total_value_snapshot", "freight_commission_deduction", "freight_responsible", "freight_value", "freight_percent")
         )
         for quote in award_sales:
             totals[quote.seller_id] += quote.net_sales_value

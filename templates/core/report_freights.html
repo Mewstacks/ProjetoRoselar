@@ -30,7 +30,7 @@
       <div class="container">
         <a href="{% url 'core:reports_hub' %}" class="text-white text-decoration-none small"><i class="fa-solid fa-arrow-left me-1" aria-hidden="true"></i>Relatórios</a>
         <h1 class="h4 fw-bold mt-2 mb-0"><i class="fa-solid fa-truck me-2" aria-hidden="true"></i>Relatório de Fretes</h1>
-        <p class="mb-0 small opacity-75">Fretes abatidos das comissões · {{ period_start|date:"d/m/Y" }} a {{ period_end|date:"d/m/Y" }}</p>
+        <p class="mb-0 small opacity-75">Fretes abatidos das vendas · {{ period_start|date:"d/m/Y" }} a {{ period_end|date:"d/m/Y" }}</p>
       </div>
     </header>
     <div class="container pb-5">
@@ -42,14 +42,14 @@
       </form>
       <div class="row g-3 mb-3">
         <div class="col-md-6"><div class="card card-body text-center"><div class="small text-uppercase text-muted fw-bold">Vendas com frete descontado</div><strong class="fs-4">{{ count }}</strong></div></div>
-        <div class="col-md-6"><div class="card card-body text-center"><div class="small text-uppercase text-muted fw-bold">Total abatido das comissões</div><strong class="fs-4 text-danger">R$ {{ total_freight_deduction|floatformat:'2g' }}</strong></div></div>
+        <div class="col-md-6"><div class="card card-body text-center"><div class="small text-uppercase text-muted fw-bold">Total abatido das vendas</div><strong class="fs-4 text-danger">R$ {{ total_freight_deduction|floatformat:'2g' }}</strong></div></div>
       </div>
       <div class="card shadow-sm overflow-hidden">
         <div class="table-responsive">
           <table class="table table-hover align-middle mb-0">
-            <caption class="visually-hidden">Fretes descontados da comissão por venda no período selecionado.</caption>
+            <caption class="visually-hidden">Frete descontado de cada venda no período selecionado.</caption>
             <thead class="table-dark"><tr><th scope="col">Data</th><th scope="col">Venda</th><th scope="col">Cliente</th><th scope="col">Vendedor</th><th scope="col" class="text-end">Frete abatido</th></tr></thead>
-            <tbody>{% for quote in quotes %}<tr><td>{{ quote.sold_on|date:"d/m/Y" }}</td><td><a href="{% url 'sales:quote_detail' quote.id %}">{{ quote.number }}</a></td><td>{{ quote.customer.name }}</td><td>{{ quote.seller.get_full_name|default:quote.seller.username }}</td><td class="text-end fw-bold text-danger">− R$ {{ quote.freight_commission_deduction|floatformat:'2g' }}</td></tr>{% empty %}<tr><td colspan="5" class="text-center text-muted py-5">Nenhum frete descontado neste período.</td></tr>{% endfor %}</tbody>
+            <tbody>{% for quote in quotes %}<tr><td>{{ quote.sold_on|date:"d/m/Y" }}</td><td><a href="{% url 'sales:quote_detail' quote.id %}">{{ quote.number }}</a></td><td>{{ quote.customer.name }}</td><td>{{ quote.seller.get_full_name|default:quote.seller.username }}</td><td class="text-end fw-bold text-danger">− R$ {{ quote.sales_freight_deduction|floatformat:'2g' }}</td></tr>{% empty %}<tr><td colspan="5" class="text-center text-muted py-5">Nenhum frete descontado neste período.</td></tr>{% endfor %}</tbody>
           </table>
         </div>
       </div>

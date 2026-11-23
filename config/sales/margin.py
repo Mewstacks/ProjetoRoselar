@@ -225,6 +225,7 @@ def _build_simulation_context(
     manual_fee_percent_2: Decimal | None = None,
     freight_embedded: bool = False,
     cash_only: bool = False,
+    informed_freight: Decimal | None = None,
 ) -> dict:
     """Wrapper que organiza os inputs do request e injeta no Motor de Margem.
 
@@ -257,6 +258,11 @@ def _build_simulation_context(
     freight_value = max(Decimal("0"), Decimal(str(freight_value or 0)))
     freight_commission_deduction = max(
         Decimal("0"), Decimal(str(freight_commission_deduction or 0))
+    )
+    # Frete informado (inclusive o da loja, que não entra no total): sai da venda
+    # líquida. Sem o dado, vale o frete repassado ao cliente.
+    informed_freight = max(
+        Decimal("0"), Decimal(str(freight_value if informed_freight is None else informed_freight))
     )
     sim_discount         = max(Decimal("0"), min(Decimal(str(sim_discount or 0)), MAX_DISCOUNT_ABSOLUTE))
     price_increase_pct   = max(Decimal("0"), min(Decimal(str(price_increase_pct or 0)), MAX_PRICE_INCREASE))
@@ -661,7 +667,7 @@ def _build_simulation_context(
         'total_after_discount':     final_total,
         'final_total':               final_total,
         'net_sales_value':           max(
-            Decimal("0"), final_total - freight_commission_deduction
+            Decimal("0"), final_total - min(final_total, max(freight_commission_deduction, informed_freight))
         ).quantize(Decimal("0.01")),
         'financed_value':           financed_value,
         'valor_avista':             valor_avista,
@@ -773,6 +779,7 @@ def simulate_quote(quote) -> dict:
         # do total e, portanto, fora da base de comissão.
         freight_value=quote.billable_freight_for_tier(selected_tier),
         freight_embedded=quote.embeds_freight,
+        informed_freight=quote.informed_freight,
         cash_only=selected_tier == PriceTier.RETAIL and quote.cash_only,
         sim_payment_type=quote.payment_type or "",
         sim_has_architect=quote.has_architect,

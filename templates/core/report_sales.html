@@ -68,7 +68,7 @@
                   <td>{{ q.customer.name|truncatechars:35 }}</td>
                   <td>{{ q.seller.username }}</td>
                   <td>{{ q.discount_percent }}%</td>
-                  <td class="text-end">{% if q.freight_commission_deduction %}− R$ {{ q.freight_commission_deduction|floatformat:'2g' }}{% else %}—{% endif %}</td>
+                  <td class="text-end">{% if q.sales_freight_deduction %}− R$ {{ q.sales_freight_deduction|floatformat:'2g' }}{% else %}—{% endif %}</td>
                   <td class="text-end fw-bold">R$ {{ q.net_sales_value|floatformat:'2g' }}</td>
                 </tr>
                 {% empty %}
