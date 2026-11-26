@@ -77,10 +77,10 @@ class OrderEditFreightTests(TestCase):
         self.quote.refresh_from_db()
         before = self.quote.commission_value
         self.assertIsNotNone(before)
-        resp = self._post(freight_value="100,00", freight_commission_deduction="30,00")
+        resp = self._post(freight_value="100,00", freight_commission_deduction="130,00")
         self.assertEqual(resp.status_code, 302)
         self.quote.refresh_from_db()
-        self.assertEqual(self.quote.freight_commission_deduction, Decimal("30.00"))
+        self.assertEqual(self.quote.freight_commission_deduction, Decimal("130.00"))
         self.assertLess(self.quote.commission_value, before)
 
     def test_deduction_above_the_customer_total_is_refused(self):

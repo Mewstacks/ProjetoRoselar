@@ -115,8 +115,6 @@ def _build_value_breakdown(quote):
     markup_amount = subtotal * markup_pct / Decimal("100")
     discount_amount = subtotal * discount_pct / Decimal("100")
     freight = quote.freight_amount(selected_tier)
-    from .models import FreightResponsible
-    freight_to_store = quote.freight_responsible == FreightResponsible.STORE
     if selected_tier == PriceTier.WHOLESALE:
         total_with_discount = (
             subtotal * (Decimal("1") + markup_pct / Decimal("100"))
@@ -129,6 +127,7 @@ def _build_value_breakdown(quote):
     rounded_total = quote.calculate_total_for_tier(selected_tier)
     real_gap, real_pct = quote.calculate_real_gap(selected_tier, total=rounded_total)
     payment_fee = quote.calculate_payment_fee_value(rounded_total)
+    interest = quote.embedded_interest_value(selected_tier)
     from .models import RoundingMode
     breakdown = {
         "subtotal": subtotal,
@@ -139,13 +138,15 @@ def _build_value_breakdown(quote):
         "has_discount": discount_pct > 0,
         "has_markup": markup_pct > 0,
         "freight": freight,
-        "freight_to_store": freight_to_store,
         "total_with_discount": total_with_discount,
         "payment_fee": payment_fee,
         "payment_fee_pct": quote.payment_fee_percent or Decimal("0.00"),
         "final_total": rounded_total,
         "rounded_total": rounded_total,
-        "rounding_diff": rounded_total - total_with_discount,
+        # Juros do crédito 7x+ dentro do total: não são arredondamento.
+        "interest": interest,
+        "has_interest": interest > 0,
+        "rounding_diff": rounded_total - total_with_discount - interest,
         "has_rounding": (
             has_override
             or quote.total_rounding_mode != RoundingMode.NONE
@@ -1745,9 +1746,9 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
         c.drawRightString(MX + CW, ty + 1, "Orçamento válido por 03 dias")
         ty -= 17
 
-        # Frete por conta da loja (STORE) nunca é cobrado do cliente — a loja
-        # arca com o custo e ele fica fora do total —, então é sempre "grátis".
-        if quote.freight_responsible == FreightResponsible.STORE:
+        # Frete próprio (STORE) com valor é cobrado e aparece no total; só
+        # vira "grátis" quando o frete informado é zero.
+        if quote.freight_responsible == FreightResponsible.STORE and not quote.freight_amount(PriceTier.RETAIL):
             c.setFillColor(GRAY)
             c.setFont(FONT_REG, 8.5)
             c.drawString(MX, ty, "Entrega e montagem grátis pela equipe Roselar Móveis.")
@@ -1855,6 +1856,17 @@ def quote_pdf_client(request: HttpRequest, quote_id: int) -> HttpResponse:
             if quote.cash_only and plan["tier"] == PriceTier.RETAIL:
                 continue
             prefix = f"{plan['tier_label']} — " if quote.dual_pricing else ""
+
+            plan_interest = quote.embedded_interest_value(plan["tier"])
+            if plan_interest > 0:
+                _row(
+                    f"{prefix}Juros do parcelamento",
+                    f"+ {_fmt_brl(plan_interest)}",
+                    lbl_color=GRAY,
+                    val_color=GRAY,
+                    lbl_font=(FONT_REG, 8.5),
+                    val_font=(FONT_BOLD, 9.5),
+                )
 
             if plan["down_payment"] > 0:
                 _row(
@@ -3132,6 +3144,29 @@ def _attach_dual_payment_simulation(ctx: dict, quote: Quote) -> None:
     }
     pricing_tier = ctx["pricing_tier"]
     markup_pct = ctx["price_increase_pct"]
+
+    def _with_interest(base):
+        """Juros 7x+ das condições da tela (ainda não salvas) sobre a outra tabela."""
+        if not quote.interest_embedded:
+            return base
+        from .margin import embed_interest, interest_fee_pct
+
+        return embed_interest(
+            base,
+            fee_1=interest_fee_pct(
+                ctx["sim_payment_type"], ctx["sim_installments"], ctx["payment_fee_percent"]
+            ),
+            fee_2=(
+                interest_fee_pct(
+                    ctx["sim_payment_type_2"], ctx["sim_installments_2"],
+                    ctx["payment_fee_percent_2"],
+                )
+                if ctx["split_mode"] else Decimal("0")
+            ),
+            down_payment=None if ctx["split_mode"] else ctx["down_payment_value"],
+            split_amount=ctx["split_amount_1"] if ctx["split_mode"] else None,
+        )[0]
+
     retail_discount = (
         ctx["discount_percent"]
         if pricing_tier == PriceTier.RETAIL
@@ -3141,19 +3176,28 @@ def _attach_dual_payment_simulation(ctx: dict, quote: Quote) -> None:
         ctx["final_total"]
         if pricing_tier == PriceTier.RETAIL
         else quote.apply_client_rounding(
-            quote.calculate_subtotal()
-            * (
-                Decimal("1")
-                + markup_pct / Decimal("100")
-                - retail_discount / Decimal("100")
+            (lambda base: base if quote.effective_total_override is not None else _with_interest(base))(
+                quote.calculate_subtotal()
+                * (
+                    Decimal("1")
+                    + markup_pct / Decimal("100")
+                    - retail_discount / Decimal("100")
+                )
+                + quote.billable_freight_for_tier(PriceTier.RETAIL)
             )
-            + quote.billable_freight_for_tier(PriceTier.RETAIL)
         )
     )
     wholesale_total = (
         ctx["final_total"]
         if pricing_tier == PriceTier.WHOLESALE
-        else quote.calculate_rounded_total_wholesale(markup_pct=markup_pct)
+        else quote.apply_client_rounding(
+            _with_interest(
+                quote.calculate_subtotal_wholesale()
+                * (Decimal("1") + markup_pct / Decimal("100"))
+                + quote.billable_freight_for_tier(PriceTier.WHOLESALE)
+            ),
+            use_override=False,
+        )
     )
     ctx["retail_payment_plan"] = build_payment_plan(
         total=retail_total,
@@ -3188,8 +3232,8 @@ def quote_simulate_commission(request: HttpRequest, quote_id: int) -> HttpRespon
         else PriceTier.RETAIL
     )
     subtotal = quote.calculate_subtotal_for_tier(pricing_tier)
-    # Frete por conta da loja (STORE) não é repassado ao cliente: fica fora do
-    # total e da comissão. billable_freight já zera esse caso.
+    # Frete cobrado do cliente (inclui o frete próprio informado); fora da
+    # base de comissão.
     freight_value = quote.billable_freight
     # Preço final digitado ("Preço Final ao Cliente", ou o à vista quando a venda
     # fechou à vista) é o valor da venda e vale só para o varejo. Com ele a
@@ -3286,6 +3330,7 @@ def quote_simulate_commission(request: HttpRequest, quote_id: int) -> HttpRespon
         freight_value=freight_value,
         freight_embedded=quote.embeds_freight,
         informed_freight=quote.informed_freight,
+        interest_embedded=quote.interest_embedded,
         cash_only=pricing_tier == PriceTier.RETAIL and quote.cash_only,
         sim_payment_type=sim_payment_type,
         sim_has_architect=sim_has_architect,

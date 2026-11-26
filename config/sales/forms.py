@@ -309,11 +309,9 @@ class QuoteForm(forms.ModelForm):
             item.line_total_wholesale if wholesale else item.line_total
             for item in items
         )
-        billable_freight = Decimal("0.00")
-        if quote.freight_responsible != "STORE":
-            billable_freight = sum(
-                quote.freight_allocations(tier, items), Decimal("0.00")
-            )
+        billable_freight = sum(
+            quote.freight_allocations(tier, items), Decimal("0.00")
+        )
         if wholesale:
             base = subtotal * (
                 Decimal("1") + (quote.price_increase_percent or Decimal("0")) / Decimal("100")

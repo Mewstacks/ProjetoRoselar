@@ -37,6 +37,8 @@ def refresh_snapshots(apps, schema_editor):
             "real_discount_pct_snapshot",
             "freight_embedded",
             "freight_percent",
+            "interest_embedded",
+            "interest_snapshot",
         )
         .prefetch_related("items")
         .iterator(chunk_size=200)

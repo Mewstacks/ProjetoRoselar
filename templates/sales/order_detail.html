@@ -616,7 +616,13 @@
                 <span class="r-l">{{ value_breakdown.selected_price_tier_label }}{% if value_breakdown.has_discount %} com desconto{% endif %} + frete</span>
                 <span style="font-weight:700;">R$ {{ value_breakdown.total_with_discount|floatformat:2 }}</span>
               </div>
-              {% if value_breakdown.payment_fee_pct > 0 %}
+              {% if value_breakdown.has_interest %}
+                <div class="r-line">
+                  <span class="r-l">Juros no crédito</span>
+                  <span style="font-weight:700;">+ R$ {{ value_breakdown.interest|floatformat:2 }}</span>
+                </div>
+              {% endif %}
+              {% if value_breakdown.payment_fee_pct > 0 and not value_breakdown.has_interest %}
                 <div class="r-line">
                   <span class="r-l">Taxa de pagamento ({{ value_breakdown.payment_fee_pct|floatformat:2 }}%) — custo da loja</span>
                   <span style="font-weight:700;color:var(--muted);">R$ {{ value_breakdown.payment_fee|floatformat:2 }}</span>

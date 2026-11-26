@@ -338,6 +338,12 @@ class Quote(models.Model):
         verbose_name="Taxa de Pagamento (%)",
         help_text="Taxa (juros) aplicada conforme parcelas"
     )
+    interest_embedded = models.BooleanField(
+        default=True,
+        verbose_name="Juros no total",
+        help_text="Crédito 7x+: o cliente paga a taxa por dentro do total. "
+                  "Desligado nas vendas anteriores à regra, para não mudar o histórico.",
+    )
 
     # split payment (second method — optional)
     payment_type_2 = models.CharField(
@@ -454,6 +460,12 @@ class Quote(models.Model):
     real_discount_pct_snapshot = models.DecimalField(
         max_digits=7, decimal_places=1, default=Decimal("0.0"),
         verbose_name="Desconto real (%)",
+    )
+    # Juros do crédito 7x+ que o cliente paga dentro do total. Vão para o banco:
+    # saem da venda líquida (metas, rankings, relatórios).
+    interest_snapshot = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal("0.00"),
+        verbose_name="Juros no total (R$)",
     )
 
     # ── Comissão apurada no fechamento da venda ───────────────────────────────
@@ -575,8 +587,12 @@ class Quote(models.Model):
         return self.freight_value or Decimal("0.00")
 
     def billable_freight_for_tier(self, tier):
-        if self.freight_responsible == FreightResponsible.STORE:
-            return Decimal("0.00")
+        """Frete cobrado do cliente.
+
+        Frete próprio (STORE) informado também é cobrado: a regra de venda
+        líquida só tira o frete das vendas da loja, não do que o cliente paga.
+        Frete zero é entrega grátis.
+        """
         return self.freight_amount(tier)
 
     @property
@@ -596,7 +612,7 @@ class Quote(models.Model):
         (subtotal), não sobre o frete, alinhado com o motor de simulação
         (_run_simulation): adj = subtotal × (1 + ajuste% − desconto%).
 
-        O frete só entra no total quando é repassado ao cliente (billable_freight);
+        O frete cobrado do cliente (billable_freight) entra no total;
         frete por conta da loja (STORE) fica de fora.
 
         `subtotal` opcional permite reaproveitar a mesma regra para o total de
@@ -612,6 +628,67 @@ class Quote(models.Model):
         )
         return adj_subtotal + self.billable_freight_for_tier(PriceTier.RETAIL)
     
+    def _interest_fees(self) -> tuple[Decimal, Decimal]:
+        """Taxas (%) que o cliente paga no total: crédito 7x+, por perna."""
+        from core.models import PaymentTariff
+        from sales.margin import interest_fee_pct
+
+        def fee(payment_type, installments, stored):
+            value = stored or Decimal("0")
+            if not value and payment_type:
+                value = PaymentTariff.get_fee(payment_type, installments or 1) or Decimal("0")
+            return interest_fee_pct(payment_type, installments, value)
+
+        first = fee(self.payment_type, self.payment_installments, self.payment_fee_percent)
+        second = Decimal("0")
+        if self.payment_type_2 and self.payment_split_amount is not None:
+            second = fee(
+                self.payment_type_2, self.payment_installments_2, self.payment_fee_percent_2
+            )
+        return first, second
+
+    def embed_interest_in(self, base: Decimal) -> Decimal:
+        """Soma por dentro os juros do crédito 7x+ à base (produtos + frete).
+
+        Mesma conta do simulador (sales.margin.embed_interest). Orçamentos
+        anteriores à regra e com preço final digitado não mudam.
+        """
+        if not self.__dict__.get("interest_embedded", False):
+            return base
+        from sales.margin import embed_interest
+
+        fee_1, fee_2 = self._interest_fees()
+        if not fee_1 and not fee_2:
+            return base
+        split = (
+            self.payment_split_amount
+            if self.payment_type_2 and self.payment_split_amount is not None
+            else None
+        )
+        return embed_interest(
+            base, fee_1=fee_1, fee_2=fee_2,
+            down_payment=None if split is not None else self.down_payment_value,
+            split_amount=split,
+        )[0]
+
+    def embedded_interest_value(self, tier: str | None = None) -> Decimal:
+        """Juros que o cliente paga dentro do total da modalidade (0 se não há)."""
+        tier = tier or self.__dict__.get("selected_price_tier", PriceTier.RETAIL)
+        wholesale = self.dual_pricing and tier == PriceTier.WHOLESALE
+        if wholesale:
+            subtotal = self.calculate_subtotal_wholesale()
+            markup = self.price_increase_percent or Decimal("0.0")
+            base = subtotal * (Decimal("1") + markup / Decimal("100")) + self.billable_freight_for_tier(tier)
+        else:
+            if (
+                self.effective_total_override is not None
+                or self.cash_only
+                or self.__dict__.get("selected_payment_terms") == PaymentTerms.CASH
+            ):
+                return Decimal("0.00")
+            base = self.calculate_total_with_freight_and_discount()
+        return max(Decimal("0.00"), self.embed_interest_in(base) - base)
+
     def calculate_payment_fee_value(self, base_total: Decimal | None = None) -> Decimal:
         """Calcula o custo bancário da modalidade efetivamente selecionada."""
         if base_total is None:
@@ -709,6 +786,8 @@ class Quote(models.Model):
         if self.cash_only:
             return self.effective_cash_override
         base = self.calculate_total_with_freight_and_discount()
+        if self.effective_total_override is None:
+            base = self.embed_interest_in(base)
         return self.apply_client_rounding(base)
 
     def calculate_rounded_total_wholesale(
@@ -730,6 +809,7 @@ class Quote(models.Model):
             subtotal * (Decimal("1") + markup_pct / Decimal("100"))
             + self.billable_freight_for_tier(PriceTier.WHOLESALE)
         )
+        base = self.embed_interest_in(base)
         return self.apply_client_rounding(base, use_override=False)
 
     def calculate_subtotal_for_tier(self, tier: str | None = None) -> Decimal:
@@ -780,7 +860,7 @@ class Quote(models.Model):
 
     @property
     def net_sales_value(self) -> Decimal:
-        """Valor interno da venda, sem frete.
+        """Valor interno da venda, sem frete e sem os juros do cartão.
 
         ``total_value_snapshot`` continua sendo o total cobrado do cliente e,
         por isso, não pode ser alterado por um ajuste interno. Metas, rankings e
@@ -790,7 +870,8 @@ class Quote(models.Model):
         comissão não usa esta conta: ela segue o abatimento manual.
         """
         total = self.total_value_snapshot or Decimal("0.00")
-        return max(Decimal("0.00"), total - self.sales_freight_deduction)
+        interest = self.__dict__.get("interest_snapshot") or Decimal("0.00")
+        return max(Decimal("0.00"), total - self.sales_freight_deduction - interest)
 
     def calculate_list_value(self, tier: str | None = None) -> Decimal:
         """Valor de tabela: itens da modalidade + frete repassado ao cliente."""
@@ -817,6 +898,8 @@ class Quote(models.Model):
             return Decimal("0.00"), Decimal("0.0")
         if total is None:
             total = self.calculate_total_for_tier(tier)
+        # Juros embutidos não são acréscimo de preço: ficam fora da comparação.
+        total = total - self.embedded_interest_value(tier)
         gap = (subtotal + self.billable_freight_for_tier(tier) - total).quantize(
             Decimal("0.01"), rounding=ROUND_HALF_UP
         )
@@ -1154,6 +1237,7 @@ def _refresh_quote_snapshot(quote_id: int) -> None:
             total_value_snapshot=total,
             real_discount_snapshot=real_gap,
             real_discount_pct_snapshot=real_pct,
+            interest_snapshot=quote.embedded_interest_value().quantize(Decimal("0.01")),
         )
     except Quote.DoesNotExist:
         pass

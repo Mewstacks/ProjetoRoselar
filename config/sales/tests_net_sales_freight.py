@@ -1,7 +1,7 @@
 """Venda líquida: todo frete informado sai do total de vendas.
 
-Frete cobrado do cliente (transportadora) está dentro do total e sai. Frete da
-loja não entra no total, mas também é abatido da venda líquida. O abatimento
+Frete cobrado do cliente (transportadora ou frete próprio) está dentro do total
+e sai da venda líquida. O abatimento
 manual ("Frete a abater") não soma por cima do frete informado: vale o maior dos
 dois, para o mesmo frete não ser descontado duas vezes. A comissão não muda.
 """
@@ -44,10 +44,10 @@ class NetSalesFreightTests(TestCase):
         self.assertEqual(quote.total_value_snapshot, Decimal("1100.00"))
         self.assertEqual(quote.net_sales_value, Decimal("1000.00"))
 
-    def test_store_freight_is_also_deducted(self):
+    def test_store_freight_is_billed_and_leaves_the_net(self):
         quote = self.quote("STORE", freight="180.00")
-        self.assertEqual(quote.total_value_snapshot, Decimal("1000.00"))
-        self.assertEqual(quote.net_sales_value, Decimal("820.00"))
+        self.assertEqual(quote.total_value_snapshot, Decimal("1180.00"))
+        self.assertEqual(quote.net_sales_value, Decimal("1000.00"))
 
     def test_customer_paid_sale_without_freight_is_untouched(self):
         quote = self.quote("CUSTOMER")
@@ -71,7 +71,7 @@ class NetSalesFreightTests(TestCase):
         self.assertEqual(quote.net_sales_value, Decimal("1000.00"))
 
     def test_net_never_goes_below_zero(self):
-        quote = self.quote("STORE", freight="5000.00")
+        quote = self.quote("CUSTOMER", deduction="5000.00")
         self.assertEqual(quote.net_sales_value, Decimal("0.00"))
 
     def test_sales_freight_deduction_reports_what_left_the_sale(self):
@@ -99,8 +99,8 @@ class NetSalesFreightTests(TestCase):
 
         resp = self.client.get(reverse("core:report_sales"), period)
         self.assertEqual(resp.status_code, 200)
-        # 1000 + 820
-        self.assertEqual(resp.context["total"], Decimal("1820.00"))
+        # 1000 + 1000
+        self.assertEqual(resp.context["total"], Decimal("2000.00"))
 
         resp = self.client.get(reverse("core:report_freights"), period)
         self.assertEqual(resp.status_code, 200)

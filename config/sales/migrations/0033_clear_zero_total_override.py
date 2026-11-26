@@ -35,7 +35,7 @@ def clear_zero_override(apps, schema_editor):
 
     for quote in Quote.objects.filter(pk__in=afetados).defer(
         "commission_gross_value", "freight_commission_deduction", "commission_rule",
-        "freight_embedded", "freight_percent", "real_discount_snapshot", "real_discount_pct_snapshot",
+        "freight_embedded", "freight_percent", "interest_embedded", "interest_snapshot", "real_discount_snapshot", "real_discount_pct_snapshot",
         "total_cash_override", "selected_payment_terms"
     ).prefetch_related("items"):
         try:

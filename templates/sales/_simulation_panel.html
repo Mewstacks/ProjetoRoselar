@@ -568,6 +568,12 @@
                   <strong style="color:var(--red);">– R$ {{ discount_value|floatformat:2 }}</strong>
                 </div>
                 {% endif %}
+                {% if interest_embedded_value > 0 %}
+                <div class="r-line">
+                  <span class="r-l">Juros ({{ sim_installments }}x no crédito)</span>
+                  <strong>+ R$ {{ interest_embedded_value|floatformat:2 }}</strong>
+                </div>
+                {% endif %}
                 {% endif %}
 
                 {% if down_payment_value > 0 %}
@@ -630,12 +636,12 @@
                   </div>
                 </div>
 
-                {% if freight_commission_deduction > 0 %}
+                {% if net_sales_differs %}
                 <div class="hi muted mt-2" aria-label="Resumo interno da venda" aria-live="polite">
                   <div class="d-flex justify-content-between align-items-center gap-3">
                     <div>
                       <div class="hi-l">Venda líquida para metas e relatórios</div>
-                      <div class="small" style="opacity:.82;">Total do cliente − frete abatido</div>
+                      <div class="small" style="opacity:.82;">Total do cliente − frete e juros</div>
                     </div>
                     <div class="hi-v" style="font-size:1.2rem;white-space:nowrap;">R$ {{ net_sales_value|floatformat:2 }}</div>
                   </div>
@@ -739,8 +745,8 @@
                           {% if quote.embeds_freight %}
                             <div>Frete fora da base · R$&nbsp;{{ freight_value|floatformat:"2g" }}</div>
                           {% endif %}
-                          {% if freight_commission_deduction %}
-                            <div>Desconto manual · − R$&nbsp;{{ freight_commission_deduction|floatformat:"2g" }}</div>
+                          {% if commission_deduction %}
+                            <div>Desconto manual · − R$&nbsp;{{ commission_deduction|floatformat:"2g" }}</div>
                           {% endif %}
                         </div>
                       </div>

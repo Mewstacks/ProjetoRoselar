@@ -389,7 +389,7 @@
                   </div>
                 {% endif %}
               {% endif %}
-              {% if quote.payment_fee_percent > 0 %}
+              {% if quote.payment_fee_percent > 0 and not value_breakdown.has_interest %}
                 <div style="font-size:.72rem;opacity:.8;margin-top:.2rem;">
                   <i class="fa-solid fa-info-circle me-1"></i>Taxa de pagamento: {{ quote.payment_fee_percent }}% (custo da loja)
                 </div>
@@ -435,13 +435,19 @@
               </div>
             {% endif %}
             <div class="r-line">
-              <span class="r-l">Frete{% if value_breakdown.freight_to_store %} <span style="font-size:.72rem;opacity:.8;">(por conta da loja — não repassado)</span>{% endif %}</span>
-              <span style="font-weight:700;{% if value_breakdown.freight_to_store %}text-decoration:line-through;opacity:.6;{% endif %}">R$ {{ value_breakdown.freight|floatformat:2 }}</span>
+              <span class="r-l">Frete</span>
+              <span style="font-weight:700;">R$ {{ value_breakdown.freight|floatformat:2 }}</span>
             </div>
             <div class="r-line">
-              <span class="r-l">{% if quote.dual_pricing %}{{ value_breakdown.selected_price_tier_label }}{% else %}Subtotal{% endif %}{% if value_breakdown.has_discount %} com desconto{% endif %}{% if not value_breakdown.freight_to_store %} + frete{% endif %}</span>
+              <span class="r-l">{% if quote.dual_pricing %}{{ value_breakdown.selected_price_tier_label }}{% else %}Subtotal{% endif %}{% if value_breakdown.has_discount %} com desconto{% endif %} + frete</span>
               <span style="font-weight:700;">R$ {{ value_breakdown.total_with_discount|floatformat:2 }}</span>
             </div>
+            {% if value_breakdown.has_interest %}
+              <div class="r-line">
+                <span class="r-l">Juros ({{ quote.payment_installments }}x no crédito)</span>
+                <span style="font-weight:700;color:var(--blue);">+ R$ {{ value_breakdown.interest|floatformat:2 }}</span>
+              </div>
+            {% endif %}
             {% if value_breakdown.has_rounding %}
               <div class="r-line">
                 <span class="r-l">{% if value_breakdown.has_override %}{% if value_breakdown.is_real_increase %}Acréscimo real{% else %}Desconto real{% endif %} ({{ value_breakdown.real_pct_abs|floatformat:1 }}%){% else %}Arredondamento{% endif %}</span>
@@ -460,7 +466,7 @@
                 <span style="font-weight:700;">R$ {% if value_breakdown.sold_cash %}{{ value_breakdown.installment_total|floatformat:2 }}{% else %}{{ value_breakdown.cash_total|floatformat:2 }}{% endif %}</span>
               </div>
             {% endif %}
-            {% if value_breakdown.payment_fee_pct > 0 %}
+            {% if value_breakdown.payment_fee_pct > 0 and not value_breakdown.has_interest %}
               <div class="r-line" style="margin-top:.3rem;">
                 <span class="r-l" style="font-size:.8rem;color:var(--muted);">Taxa de pagamento ({{ value_breakdown.payment_fee_pct|floatformat:2 }}%) — custo da loja, não cobrado do cliente</span>
                 <span style="font-weight:700;color:var(--muted);font-size:.8rem;">− R$ {{ value_breakdown.payment_fee|floatformat:2 }}</span>

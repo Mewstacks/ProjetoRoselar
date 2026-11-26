@@ -520,7 +520,9 @@ class SimulationTariffTests(TestCase):
     def test_cartao_12x_informa_margem_sem_bloquear(self):
         ctx = self._sim("CREDIT_CARD", 12)
         self.assertEqual(ctx["payment_fee_percent"], Decimal("13.30"))
-        self.assertLess(ctx["margin_balance"], 0)
+        # Cliente paga a taxa por dentro: 10.000 ÷ (1 − 13,30%) e margem intacta.
+        self.assertEqual(ctx["final_total"].quantize(Decimal("0.01")), Decimal("11534.03"))
+        self.assertEqual(ctx["margin_balance"], Decimal("1200.00"))
         self.assertFalse(ctx["controls_blocked"])
 
     def test_cheque_12x_cobra_taxa_do_cartao(self):
@@ -602,7 +604,8 @@ class SimulationSuggestionTests(TestCase):
         sugerido = ctx["min_increase_to_unblock"]
         depois = self._sim(12, price_increase=sugerido)
         self.assertFalse(depois["controls_blocked"])
-        self.assertLess(depois["margin_balance"], 0)
+        # Juros 7x+ são pagos pelo cliente: a margem fica nos 12% de sempre.
+        self.assertEqual(depois["margin_balance"], Decimal("1200.00"))
 
     def test_sugestao_e_o_minimo(self):
         # Um passo (0,1%) abaixo do sugerido ainda tem que travar, senao o
@@ -1009,12 +1012,13 @@ class DualPricingTests(TestCase):
         ])
 
         retail, wholesale = self.quote.get_payment_plans()
-        self.assertEqual(retail["total"], Decimal("2070.000"))
-        self.assertEqual(retail["primary"]["installment_value"], Decimal("207.000"))
-        self.assertEqual(wholesale["total"], Decimal("1900.000"))
+        # Crédito 10x paga 11,92% por dentro: 2.070 ÷ 0,8808 e 1.900 ÷ 0,8808.
+        self.assertEqual(retail["total"], Decimal("2350.14"))
+        self.assertEqual(retail["primary"]["installment_value"], Decimal("235.014"))
+        self.assertEqual(wholesale["total"], Decimal("2157.13"))
         self.assertEqual(
             wholesale["primary"]["installment_value"],
-            Decimal("190.000"),
+            Decimal("215.713"),
         )
 
     def test_split_payment_is_recalculated_for_both_totals(self):
@@ -1028,12 +1032,13 @@ class DualPricingTests(TestCase):
 
         retail, wholesale = self.quote.get_payment_plans()
         self.assertEqual(retail["primary"]["amount"], Decimal("500.00"))
-        self.assertEqual(retail["secondary"]["amount"], Decimal("1570.000"))
+        # 7x paga 9,87% por dentro: o restante da base (1.570 / 1.400) ÷ 0,9013.
+        self.assertEqual(retail["secondary"]["amount"], Decimal("1741.93"))
         self.assertEqual(wholesale["primary"]["amount"], Decimal("500.00"))
-        self.assertEqual(wholesale["secondary"]["amount"], Decimal("1400.000"))
+        self.assertEqual(wholesale["secondary"]["amount"], Decimal("1553.31"))
         self.assertEqual(
             wholesale["secondary"]["installment_value"],
-            Decimal("200.000"),
+            Decimal("1553.31") / Decimal("7"),
         )
 
     def test_entry_plus_boleto_30_dias_is_described_as_deferred(self):
@@ -1195,8 +1200,9 @@ class DualPricingTests(TestCase):
             page.extract_text() or ""
             for page in PdfReader(BytesIO(resp.content)).pages
         )
-        self.assertIn("10x de R$ 207,00", text)
-        self.assertIn("10x de R$ 190,00", text)
+        # 2.070 e 1.900 com juros do crédito 10x (11,92%) por dentro.
+        self.assertIn("10x de R$ 235,01", text)
+        self.assertIn("10x de R$ 215,71", text)
 
     def test_client_pdf_keeps_price_tiers_separate_from_pix(self):
         """O cliente deve ler Varejo e Atacado, não "Varejo PIX"."""
@@ -1241,8 +1247,8 @@ class DualPricingTests(TestCase):
         self.client.login(username="admin", password="x")
 
         resp = self.client.get(reverse("sales:quote_detail", args=[self.quote.id]))
-        self.assertContains(resp, "10x de R$ 207,00")
-        self.assertContains(resp, "10x de R$ 190,00")
+        self.assertContains(resp, "10x de R$ 235,01")
+        self.assertContains(resp, "10x de R$ 215,71")
 
     def test_conversion_records_wholesale_as_the_real_sale_value(self):
         self.client.login(username="admin", password="x")
@@ -2188,11 +2194,12 @@ class DescontoRealTests(TestCase):
         self.assertEqual(self.quote.calculate_real_gap(),
                          (Decimal("100.00"), Decimal("10.0")))
 
-    def test_frete_por_conta_da_loja_fica_fora_da_conta(self):
+    def test_frete_proprio_informado_entra_na_tabela_e_no_total(self):
         self._set(freight_responsible="STORE", freight_value=Decimal("100.00"),
                   total_override=Decimal("900.00"))
+        # tabela 1.000 + frete 100 = 1.100 contra preço final 900
         self.assertEqual(self.quote.calculate_real_gap(),
-                         (Decimal("100.00"), Decimal("10.0")))
+                         (Decimal("200.00"), Decimal("20.0")))
 
     def test_vendido_a_vista_usa_o_preco_a_vista(self):
         from sales.models import PaymentTerms

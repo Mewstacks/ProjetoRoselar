@@ -12,6 +12,58 @@ import json
 from decimal import Decimal, ROUND_CEILING, ROUND_HALF_UP
 
 
+# Juros que o cliente paga no total: só crédito parcelado a partir de 7x. De 1x a
+# 6x a loja segue absorvendo a taxa (custo dentro dos 12% de margem).
+EMBED_MIN_INSTALLMENTS = 7
+
+
+def interest_fee_pct(payment_type, installments, fee_pct) -> Decimal:
+    """Taxa que vira juros no total do cliente; 0 quando a loja absorve."""
+    fee = Decimal(str(fee_pct or 0))
+    if (
+        payment_type == "CREDIT_CARD"
+        and int(installments or 1) >= EMBED_MIN_INSTALLMENTS
+        and Decimal("0") < fee < Decimal("100")
+    ):
+        return fee
+    return Decimal("0")
+
+
+def embed_interest(
+    base: Decimal,
+    *,
+    fee_1: Decimal = Decimal("0"),
+    fee_2: Decimal = Decimal("0"),
+    down_payment: Decimal | None = None,
+    split_amount: Decimal | None = None,
+) -> tuple[Decimal, Decimal, Decimal]:
+    """Total do cliente com os juros por dentro: cada parte paga base ÷ (1 − taxa).
+
+    `base` é produtos ajustados + frete, sem juros. Sem divisão, a entrada (à
+    vista, sem taxa) é abatida antes e só o restante financiado leva juros. Na
+    divisão, `split_amount` é o valor COM juros da primeira parte (o que o
+    cliente vê); a segunda parte cobre o que sobra da base.
+
+    Devolve (total, parte_1, parte_2). Sem divisão, parte_1 é o total e parte_2 0.
+    """
+    base = max(Decimal("0"), Decimal(str(base or 0)))
+    one = Decimal("1")
+    cent = Decimal("0.01")
+    fee_1 = max(Decimal("0"), Decimal(str(fee_1 or 0))) / Decimal("100")
+    fee_2 = max(Decimal("0"), Decimal(str(fee_2 or 0))) / Decimal("100")
+    if split_amount is not None:
+        leg_1 = max(Decimal("0"), Decimal(str(split_amount)))
+        base_1 = leg_1 * (one - fee_1)
+        if base_1 >= base:
+            leg_1 = (base / (one - fee_1)).quantize(cent, rounding=ROUND_HALF_UP)
+            return leg_1, leg_1, Decimal("0")
+        leg_2 = ((base - base_1) / (one - fee_2)).quantize(cent, rounding=ROUND_HALF_UP)
+        return leg_1 + leg_2, leg_1, leg_2
+    down = min(max(Decimal("0"), Decimal(str(down_payment or 0))), base)
+    total = (down + (base - down) / (one - fee_1)).quantize(cent, rounding=ROUND_HALF_UP)
+    return total, total, Decimal("0")
+
+
 def _run_simulation(
     subtotal: Decimal,
     freight_value: Decimal,
@@ -21,6 +73,7 @@ def _run_simulation(
     has_architect: bool,
     payment_methods: list[dict],
     total_override: Decimal | None = None,
+    gross_total: Decimal | None = None,
 ) -> dict:
     """Motor de Margem Unificado.
 
@@ -70,6 +123,14 @@ def _run_simulation(
             Decimal('1') + (markup_pct / Decimal('100')) - (discount_pct / Decimal('100'))
         )
         valor_total_venda = valor_produtos_ajustado + freight_value
+        if gross_total is not None:
+            # Juros por dentro: o total já vem com a taxa embutida (embed_interest).
+            valor_total_venda = max(Decimal('0'), Decimal(str(gross_total)))
+    juros_embutidos = Decimal('0')
+    if gross_total is not None and total_override is None:
+        juros_embutidos = max(
+            Decimal('0'), valor_total_venda - (valor_produtos_ajustado + freight_value)
+        )
 
     entrada_efetiva   = min(max(Decimal('0'), down_payment), max(Decimal('0'), valor_total_venda))
     valor_a_financiar = max(Decimal('0'), valor_total_venda - entrada_efetiva)
@@ -110,7 +171,7 @@ def _run_simulation(
             juros_totais_banco += juros_metodo
 
             # O juro do frete já foi coberto pelo markup por dentro — isola para não penalizar a margem
-            if valor_total_venda > 0:
+            if valor_total_venda > 0 and total_override is not None:
                 proporcao_frete    = freight_value / valor_total_venda
                 juros_so_do_frete += juros_metodo * proporcao_frete
     elif not payment_methods:
@@ -125,7 +186,11 @@ def _run_simulation(
     # budget + acréscimo − desconto — porque é algebricamente idêntica quando o
     # preço vem de % e continua correta quando ele vem do preço final digitado.
     margem_bruta        = valor_produtos_ajustado - (subtotal * Decimal('0.88'))
-    custos_operacionais = (juros_totais_banco - juros_so_do_frete) + custo_arquiteto
+    # Juros embutidos no total já foram pagos pelo cliente: não pesam na margem.
+    custos_operacionais = (
+        max(Decimal('0'), juros_totais_banco - juros_so_do_frete - juros_embutidos)
+        + custo_arquiteto
+    )
     lucro_sobra         = margem_bruta - custos_operacionais
     mld_pct = (lucro_sobra / subtotal) * Decimal('100') if subtotal > Decimal('0') else Decimal('0')
 
@@ -226,6 +291,7 @@ def _build_simulation_context(
     freight_embedded: bool = False,
     cash_only: bool = False,
     informed_freight: Decimal | None = None,
+    interest_embedded: bool = True,
 ) -> dict:
     """Wrapper que organiza os inputs do request e injeta no Motor de Margem.
 
@@ -259,8 +325,8 @@ def _build_simulation_context(
     freight_commission_deduction = max(
         Decimal("0"), Decimal(str(freight_commission_deduction or 0))
     )
-    # Frete informado (inclusive o da loja, que não entra no total): sai da venda
-    # líquida. Sem o dado, vale o frete repassado ao cliente.
+    # Frete informado: sai da venda líquida. Sem o dado, vale o frete repassado
+    # ao cliente.
     informed_freight = max(
         Decimal("0"), Decimal(str(freight_value if informed_freight is None else informed_freight))
     )
@@ -303,14 +369,36 @@ def _build_simulation_context(
     if split_mode and sim_payment_type_2:
         fee_2 = _fee_for(sim_payment_type_2, sim_installments_2, manual_fee_percent_2, 2)
 
-    # ---- Markup por dentro no Frete ANTES de dividir o valor entre pernas ----
+    # ---- Juros por dentro no total do cliente (crédito 7x+) ----
+    # Com preço final digitado o valor é o digitado: nada é embutido.
+    interest_fee_1 = interest_fee_pct(sim_payment_type, sim_installments, fee_1)
+    interest_fee_2 = (
+        interest_fee_pct(sim_payment_type_2, sim_installments_2, fee_2) if split_mode else Decimal("0")
+    )
+    embed = (
+        interest_embedded
+        and total_override is None
+        and (interest_fee_1 > 0 or interest_fee_2 > 0)
+    )
+
+    # ---- Markup por dentro no Frete, só com preço final digitado ----
+    # O preço digitado manda; o frete sai dele já com a taxa para a base dos
+    # produtos não ficar inflada. Sem preço digitado o frete entra cru: ou os
+    # juros 7x+ são embutidos no total inteiro, ou a loja absorve a taxa.
     # Usa a maior taxa para garantir que a pior perna ainda cobre o frete exato.
     taxa_maxima        = max(fee_1, fee_2)
     taxa_decimal_frete = taxa_maxima / Decimal("100")
-    if not freight_embedded and taxa_decimal_frete < Decimal("1") and freight_value > 0:
+    if (
+        total_override is not None
+        and not freight_embedded
+        and taxa_decimal_frete < Decimal("1")
+        and freight_value > 0
+    ):
         freight_cobrado = freight_value / (Decimal("1") - taxa_decimal_frete)
     else:
         freight_cobrado = freight_value
+
+    dp_input = max(Decimal("0"), Decimal(str(down_payment_value or 0)))
 
     # ---- Total temporário baseado no frete JÁ com markup ----
     # Com preço final digitado o total não depende mais do acréscimo: qualquer
@@ -320,7 +408,16 @@ def _build_simulation_context(
         if total_override is not None:
             return total_override
         adj = subtotal * (Decimal("1") + pi / Decimal("100") - sim_discount / Decimal("100"))
-        return max(Decimal("0"), adj + freight_cobrado)
+        base = max(Decimal("0"), adj + freight_cobrado)
+        if not embed:
+            return base
+        return embed_interest(
+            base,
+            fee_1=interest_fee_1,
+            fee_2=interest_fee_2,
+            down_payment=None if split_mode else dp_input,
+            split_amount=sim_split_amount if (split_mode and sim_split_amount) else None,
+        )[0]
 
     # ---- Construção da lista de métodos de pagamento para o Motor ----
     def _methods_for_total(total: Decimal) -> list[dict]:
@@ -355,8 +452,6 @@ def _build_simulation_context(
         valor_leg_2 = Decimal("0")
 
     # ---- Higienização da entrada (down payment) HONESTA ----
-    dp_input = max(Decimal("0"), Decimal(str(down_payment_value or 0)))
-
     dp_min_value = Decimal("0")
     if split_mode:
         # No modo Entrada Financiada a perna 1 já foi embutida nos payment_methods
@@ -377,6 +472,7 @@ def _build_simulation_context(
         has_architect=sim_has_architect,
         payment_methods=payment_methods,
         total_override=total_override,
+        gross_total=valor_temporario_total if embed else None,
     )
 
     # ---- Entrada mínima para desbloquear (MLD >= 0) ----
@@ -518,8 +614,12 @@ def _build_simulation_context(
     seller_commission_percent = resultado['seller']['commission_pct']
     seller_commission_value   = resultado['seller']['commission_value']
     seller_commission_gross = seller_commission_value.quantize(Decimal("0.01"))
+    # O frete cobrado do cliente não sai da comissão: ele já foi pago e a base
+    # da comissão (produtos) não o inclui. Só o abatimento que passa do frete
+    # cobrado é custo do vendedor.
+    commission_deduction = max(Decimal("0"), freight_commission_deduction - freight_value)
     seller_commission_value = max(
-        Decimal("0"), seller_commission_gross - freight_commission_deduction
+        Decimal("0"), seller_commission_gross - commission_deduction
     ).quantize(Decimal("0.01"))
     sacrifice_active          = resultado['seller']['sacrifice_active']
 
@@ -565,6 +665,7 @@ def _build_simulation_context(
             has_architect=sim_has_architect,
             payment_methods=methods,
             total_override=total_override,
+            gross_total=total if embed else None,
         )
         return (r['costs']['margin_balance'] / subtotal) * Decimal("100")
 
@@ -629,6 +730,13 @@ def _build_simulation_context(
         if financed_value > 0 else Decimal("0")
     )
 
+    net_sales_val = max(
+        Decimal("0"),
+        final_total
+        - min(final_total, max(freight_commission_deduction, informed_freight))
+        - (final_total - total_before_disc if embed else Decimal("0")),
+    ).quantize(Decimal("0.01"))
+
     return {
         # Inputs devolvidos para a tela
         'subtotal':                 subtotal,
@@ -648,6 +756,7 @@ def _build_simulation_context(
         'split_both_cards':         split_both_cards,
         'down_payment_value':       down_payment_used,
         'freight_commission_deduction': freight_commission_deduction,
+        'commission_deduction':     commission_deduction,
         'dp_min_value':             dp_min_value,
         'dp_to_unlock':             dp_to_unlock,
 
@@ -655,6 +764,8 @@ def _build_simulation_context(
         'adj_subtotal':             adj_subtotal,
         'price_increase_value':     adj_pre_override - subtotal,
         'total_before_discount':    total_before_disc,
+        'interest_embedded_value':  (final_total - total_before_disc) if embed else Decimal("0"),
+        'interest_embedded':        embed,
         'total_override_active':    total_override is not None,
         'total_override_value':     total_override,
         'override_adjust_value':    final_total - total_before_disc,
@@ -666,9 +777,8 @@ def _build_simulation_context(
         'discount_value':           discount_value,
         'total_after_discount':     final_total,
         'final_total':               final_total,
-        'net_sales_value':           max(
-            Decimal("0"), final_total - min(final_total, max(freight_commission_deduction, informed_freight))
-        ).quantize(Decimal("0.01")),
+        'net_sales_value':           net_sales_val,
+        'net_sales_differs':         net_sales_val != final_total.quantize(Decimal("0.01")),
         'financed_value':           financed_value,
         'valor_avista':             valor_avista,
 
@@ -775,11 +885,11 @@ def simulate_quote(quote) -> dict:
     )
     return _build_simulation_context(
         subtotal=quote.calculate_subtotal_for_tier(selected_tier),
-        # Frete por conta da loja (STORE) não é repassado ao cliente: fica fora
-        # do total e, portanto, fora da base de comissão.
+        # Frete cobrado do cliente (inclui o frete próprio informado).
         freight_value=quote.billable_freight_for_tier(selected_tier),
         freight_embedded=quote.embeds_freight,
         informed_freight=quote.informed_freight,
+        interest_embedded=quote.__dict__.get("interest_embedded", False),
         cash_only=selected_tier == PriceTier.RETAIL and quote.cash_only,
         sim_payment_type=quote.payment_type or "",
         sim_has_architect=quote.has_architect,
