@@ -946,6 +946,93 @@ class QuoteSaleDateEndpointTests(TestCase):
         self.assertEqual(self.quote.sale_date, date(2026, 7, 5))  # inalterado
 
 
+class QuoteSetSellerTests(TestCase):
+    """Admin troca o vendedor dono da venda (venda lançada no usuário errado)."""
+
+    def setUp(self):
+        from core.models import Customer
+
+        self.admin = User.objects.create_user(username="admin", password="x", role="ADMIN")
+        self.seller = User.objects.create_user(username="v", password="x", role="SELLER")
+        self.ines = User.objects.create_user(username="ines", password="x", role="SELLER")
+        self.other = User.objects.create_user(username="outro", password="x", role="SELLER")
+        self.finance = User.objects.create_user(username="fin", password="x", role="FINANCE")
+        self.customer = Customer.objects.create(name="Cliente")
+        self.quote = Quote.objects.create(
+            number="ORC-7300", customer=self.customer, seller=self.seller,
+            status=QuoteStatus.CONVERTED, sale_date=date(2026, 7, 5),
+        )
+        self.url = reverse("sales:quote_set_seller", args=[self.quote.id])
+
+    def test_admin_changes_seller_and_logs(self):
+        from core.models import AuditLog
+
+        self.client.login(username="admin", password="x")
+        resp = self.client.post(self.url, {"seller": self.ines.id})
+        self.assertEqual(resp.status_code, 302)
+        self.quote.refresh_from_db()
+        self.assertEqual(self.quote.seller_id, self.ines.id)
+        log = AuditLog.objects.filter(object_type="Quote", object_id=self.quote.id).first()
+        self.assertIsNotNone(log)
+        self.assertEqual(log.extra_data["diff"]["Vendedor"], {"de": "v", "para": "ines"})
+
+    def test_original_seller_cannot_change(self):
+        self.client.login(username="v", password="x")
+        resp = self.client.post(self.url, {"seller": self.ines.id})
+        self.assertEqual(resp.status_code, 403)
+        self.quote.refresh_from_db()
+        self.assertEqual(self.quote.seller_id, self.seller.id)
+
+    def test_finance_cannot_change(self):
+        self.client.login(username="fin", password="x")
+        resp = self.client.post(self.url, {"seller": self.ines.id})
+        self.assertEqual(resp.status_code, 403)
+        self.quote.refresh_from_db()
+        self.assertEqual(self.quote.seller_id, self.seller.id)
+
+    def test_rejects_non_seller_target(self):
+        self.client.login(username="admin", password="x")
+        self.client.post(self.url, {"seller": self.finance.id})
+        self.quote.refresh_from_db()
+        self.assertEqual(self.quote.seller_id, self.seller.id)
+
+    def test_rejects_inactive_target(self):
+        self.ines.is_active = False
+        self.ines.save(update_fields=["is_active"])
+        self.client.login(username="admin", password="x")
+        self.client.post(self.url, {"seller": self.ines.id})
+        self.quote.refresh_from_db()
+        self.assertEqual(self.quote.seller_id, self.seller.id)
+
+    def test_split_keeps_owner_in_sync(self):
+        from sales.commission_split import apply_commission_split
+
+        apply_commission_split(self.quote, [self.other.id])
+        self.client.login(username="admin", password="x")
+        self.client.post(self.url, {"seller": self.ines.id})
+        quote = Quote.objects.get(pk=self.quote.pk)
+        users = set(quote.commission_split.users.values_list("pk", flat=True))
+        self.assertEqual(users, {self.ines.id, self.other.id})
+
+    def test_split_when_new_owner_was_already_participant(self):
+        from sales.commission_split import apply_commission_split
+
+        apply_commission_split(self.quote, [self.ines.id])
+        self.client.login(username="admin", password="x")
+        self.client.post(self.url, {"seller": self.ines.id})
+        quote = Quote.objects.get(pk=self.quote.pk)
+        # Sobrou só o novo dono: divisão sem participante extra é apagada.
+        self.assertEqual(quote.seller_id, self.ines.id)
+        self.assertFalse(hasattr(quote, "commission_split"))
+
+    def test_same_seller_is_noop(self):
+        from core.models import AuditLog
+
+        self.client.login(username="admin", password="x")
+        self.client.post(self.url, {"seller": self.seller.id})
+        self.assertFalse(AuditLog.objects.filter(object_type="Quote", object_id=self.quote.id).exists())
+
+
 class DualPricingTests(TestCase):
     """Orçamento atacado + varejo: dois preços por item (Parte 3)."""
 

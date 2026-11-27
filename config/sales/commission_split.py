@@ -75,6 +75,31 @@ def apply_commission_split(quote: Quote, raw_ids) -> dict:
     return {"before": before, "after": after, "changed": before != after}
 
 
+def reassign_owner(quote: Quote, new_seller) -> None:
+    """Passa a venda para outro vendedor, mantendo a divisão coerente.
+
+    O dono entra sempre na divisão (ver `apply_commission_split`), então trocar
+    `quote.seller` sem mexer nela deixaria o dono antigo recebendo comissão de
+    uma venda que já não é dele. O antigo sai, o novo entra; se o novo já era
+    participante a lista só encolhe, e sem participante extra a linha é apagada.
+    """
+    old_seller_id = quote.seller_id
+    quote.seller = new_seller
+    quote.save(update_fields=["seller"])
+
+    existing = QuoteCommissionSplit.objects.filter(quote=quote).first()
+    if not existing:
+        return
+    others = [
+        u for u in existing.users.all()
+        if u.pk not in (old_seller_id, new_seller.pk)
+    ]
+    if others:
+        existing.users.set([new_seller, *others])
+    else:
+        existing.delete()
+
+
 def split_participants(quote: Quote) -> list[dict]:
     """Quem recebe o quê nesta venda, na mesma conta do relatório.
 

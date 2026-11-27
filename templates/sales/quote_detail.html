@@ -303,6 +303,28 @@
                       <span><i class="fa-solid fa-user-tie"></i>{{ quote.seller.username }}</span>
                       <span><i class="fa-solid fa-calendar"></i>{{ quote.quote_date|date:"d/m/Y" }}</span>
                     </div>
+                    {% if is_admin %}
+                    <form method="post" action="{% url 'sales:quote_set_seller' quote.id %}"
+                          class="d-flex align-items-center gap-2 flex-wrap" style="padding-top:.5rem;">
+                      {% csrf_token %}
+                      <label for="seller_input"
+                             style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0;">
+                        <i class="fa-solid fa-user-tie me-1"></i>Vendedor
+                      </label>
+                      <select id="seller_input" name="seller" required
+                              style="border:1.5px solid var(--border);border-radius:8px;padding:.25rem .5rem;font-size:.82rem;font-weight:600;color:var(--brand);">
+                        {% if not owner_in_choices %}
+                        <option value="{{ quote.seller_id }}" selected>{{ quote.seller.get_full_name|default:quote.seller.username }}</option>
+                        {% endif %}
+                        {% for u in owner_choices %}
+                        <option value="{{ u.pk }}" {% if u.pk == quote.seller_id %}selected{% endif %}>{{ u.get_full_name|default:u.username }}</option>
+                        {% endfor %}
+                      </select>
+                      <button type="submit" class="btn-a secondary" style="padding:.3rem .7rem;font-size:.78rem;">
+                        <i class="fa-solid fa-check"></i>Salvar
+                      </button>
+                    </form>
+                    {% endif %}
                     {% if quote.status == 'CONVERTED' or quote.status == 'POS_VENDA' %}
                     <form method="post" action="{% url 'sales:quote_set_sale_date' quote.id %}"
                           class="d-flex align-items-center gap-2 flex-wrap" style="padding-top:.5rem;">

@@ -853,6 +853,14 @@ def quote_detail(request: HttpRequest, quote_id: int) -> HttpResponse:
         .exclude(pk=quote.seller_id)
         .order_by("first_name", "username")
     )
+    owner_choices = []
+    owner_in_choices = True
+    if _is_admin(request.user):
+        owner_choices = list(
+            User.objects.filter(is_active=True, role=Role.SELLER)
+            .order_by("first_name", "username")
+        )
+        owner_in_choices = any(u.pk == quote.seller_id for u in owner_choices)
     existing_split = getattr(quote, "commission_split", None)
     existing_split_ids = (
         set(existing_split.users.values_list("pk", flat=True))
@@ -885,6 +893,8 @@ def quote_detail(request: HttpRequest, quote_id: int) -> HttpResponse:
     return render(request, "sales/quote_detail.html", {
         "quote": quote,
         "sellers_for_split": sellers_for_split,
+        "owner_choices": owner_choices,
+        "owner_in_choices": owner_in_choices,
         "existing_split_ids": existing_split_ids,
         "split_participants": split_participants(quote),
         "can_edit_commission_split": _can_edit_commission_split(request.user, quote),
@@ -966,6 +976,59 @@ def quote_set_sale_date(request: HttpRequest, quote_id: int) -> HttpResponse:
             request,
             f"Data da venda atualizada para {new_date.strftime('%d/%m/%Y')}.",
         )
+
+    return redirect("sales:quote_detail", quote_id=quote.id)
+
+
+@login_required
+@require_http_methods(["POST"])
+def quote_set_seller(request: HttpRequest, quote_id: int) -> HttpResponse:
+    """Troca o vendedor dono da venda. Só admin.
+
+    Serve para a venda lançada no usuário errado. A comissão congelada não é
+    recalculada (mesma razão de `quote_commission_split_edit`): muda só quem
+    recebe. Em qualquer status, porque o erro aparece depois do fechamento.
+    """
+    if not _is_admin(request.user):
+        return HttpResponseForbidden("Acesso negado.")
+
+    from accounts.models import Role
+    from django.contrib.auth import get_user_model
+    from core.audit import log_quote_diff, quote_financial_snapshot
+    from core.models import AuditAction
+    from sales.commission_split import reassign_owner
+
+    quote = get_object_or_404(Quote.objects.select_related("seller"), id=quote_id)
+    try:
+        new_id = int(request.POST.get("seller", ""))
+    except ValueError:
+        new_id = None
+    new_seller = (
+        get_user_model().objects
+        .filter(pk=new_id, is_active=True, role=Role.SELLER).first()
+        if new_id else None
+    )
+    if new_seller is None:
+        messages.error(request, "Vendedor inválido.")
+        return redirect("sales:quote_detail", quote_id=quote.id)
+
+    if new_seller.pk != quote.seller_id:
+        before = quote_financial_snapshot(quote)
+        reassign_owner(quote, new_seller)
+        # Instância nova: o retrato lê `commission_split`, que fica em cache.
+        quote = Quote.objects.select_related("seller").get(pk=quote.pk)
+        log_quote_diff(
+            request.user,
+            AuditAction.EDIT_VALUES,
+            quote,
+            before,
+            description=(
+                f"Vendedor do orçamento {quote.number} alterado para "
+                f"{new_seller.get_full_name() or new_seller.username}."
+            ),
+            ip_address=request.META.get("REMOTE_ADDR"),
+        )
+        messages.success(request, "Vendedor atualizado.")
 
     return redirect("sales:quote_detail", quote_id=quote.id)
 
